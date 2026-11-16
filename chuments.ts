@@ -59,12 +59,12 @@ export const TabelaReacoes: Record<string, string> = {
   [`${Elemento.ELETRICO}_${Elemento.AGUA}`]: "Confusao",
   [`${Elemento.AGUA}_${Elemento.GELO}`]: "Congelamento",
   [`${Elemento.GELO}_${Elemento.AGUA}`]: "Congelamento",
-  // ... Outras reações serão adicionadas conforme formos expandindo
 };
 
 // ==========================================
-// 3. CLASSE ATAQUE
+// 3. CLASSES BASE (ATAQUE E ITEM)
 // ==========================================
+
 export class Ataque {
   private ppAtual: number;
 
@@ -92,6 +92,19 @@ export class Ataque {
   public restaurarPP(): void { this.ppAtual = this.ppMaximo; }
 }
 
+// A classe Item agora aceita uma função que pode ou não receber um Ataque específico
+export class Item {
+  constructor(
+    public readonly nome: string,
+    private readonly efeito: (alvo: Monstrinho, ataque?: Ataque) => void
+  ) {}
+
+  public usar(alvo: Monstrinho, ataque?: Ataque): void {
+    console.log(`🎒 Usando ${this.nome} em ${alvo.nome}...`);
+    this.efeito(alvo, ataque);
+  }
+}
+
 // ==========================================
 // 4. CLASSE ABSTRATA MONSTRINHO
 // ==========================================
@@ -101,7 +114,6 @@ export abstract class Monstrinho {
   protected elementosAplicados: Elemento[] = [];
   protected estados: Estado[] = [];
   
-  // Modificadores temporários de batalha
   protected modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
 
   constructor(
@@ -120,7 +132,7 @@ export abstract class Monstrinho {
 
   public abstract evoluir(): Monstrinho | null;
 
-  // --- Getters (Aplicam modificadores temporários) ---
+  // --- Getters ---
   public getVida(): number { return this.vidaAtual; }
   public getVidaMaxima(): number { return this.vidaMaxima; }
   public getAtaque(): number { return Math.floor(this.ataque * this.modificadores.ataque); }
@@ -134,7 +146,7 @@ export abstract class Monstrinho {
   public getElementosAplicados(): Elemento[] { return this.elementosAplicados; }
   public getEstados(): Estado[] { return this.estados; }
 
-  // --- Métodos de Vida ---
+  // --- Métodos de Vida e Modificadores ---
   public receberDano(valor: number): void { this.vidaAtual = Math.max(0, this.vidaAtual - valor); }
   public curar(valor: number): void { this.vidaAtual = Math.min(this.vidaMaxima, this.vidaAtual + valor); }
   public aplicarModificador(status: 'ataque' | 'defesa' | 'velocidade' | 'precisao', multiplicador: number): void {
@@ -145,6 +157,10 @@ export abstract class Monstrinho {
   public aprenderAtaque(ataque: Ataque): void {
     if (this.ataques.length < 4) this.ataques.push(ataque);
     else throw new Error("O monstrinho já possui 4 ataques.");
+  }
+
+  public restaurarTodosPP(): void {
+    this.ataques.forEach(ataque => ataque.restaurarPP());
   }
 
   public ganharExperiencia(valor: number): void {
@@ -160,7 +176,7 @@ export abstract class Monstrinho {
         this.ataque += 2;
         this.defesa += 2;
         this.velocidade += 1;
-        this.vidaAtual = this.vidaMaxima; // Restaura vida ao upar
+        this.vidaAtual = this.vidaMaxima;
       } else break;
     }
   }
@@ -177,11 +193,14 @@ export abstract class Monstrinho {
   }
 
   public limparElementos(): void { this.elementosAplicados = []; }
-
-  // --- Métodos de Estados ---
   public adicionarEstado(estado: Estado): void { if (!this.estados.includes(estado)) this.estados.push(estado); }
   public removerEstado(estado: Estado): void { this.estados = this.estados.filter(e => e !== estado); }
   public temEstado(estado: Estado): boolean { return this.estados.includes(estado); }
+
+  public restaurarEstado(vida: number, experiencia: number): void {
+    this.vidaAtual = vida;
+    this.experiencia = experiencia;
+  }
 
   public resetarAposBatalha(): void {
     this.modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
@@ -295,35 +314,140 @@ export class Shadenight extends Monstrinho {
 }
 
 // ==========================================
-// 6. TREINADOR (Base para os testes funcionarem)
+// 6. TREINADOR E ARMAZENAMENTO
 // ==========================================
 export class Treinador {
   public ativos: Monstrinho[] = [];
+  public mochila: Item[] = [];
+  public armazenamento: Monstrinho[] = []; // Limite altíssimo (teoricamente infinito)
 
   constructor(
-    public nome: string, 
-    public equipe: Monstrinho[]
+    public readonly nome: string, 
+    public equipe: Monstrinho[] = []
   ) {
-    // Coloca os dois primeiros vivos como ativos
-    this.ativos = this.equipe.slice(0, 2);
+    this.atualizarAtivosIniciais();
   }
 
-  public trocarMonstrinho(antigo: Monstrinho, novo: Monstrinho) {
-    const index = this.ativos.indexOf(antigo);
-    if (index !== -1) this.ativos[index] = novo;
+  private atualizarAtivosIniciais(): void {
+    this.ativos = this.equipe.filter(m => m.getVida() > 0).slice(0, 2);
   }
 
-  public usarItem(item: any, alvo: Monstrinho) {
-    // Implementaremos a lógica de itens depois
+  // --- Gestão de Equipe e Captura ---
+  public capturarMonstrinho(novoMonstrinho: Monstrinho, trocarPor?: Monstrinho): void {
+    if (this.equipe.length < 6) {
+      this.equipe.push(novoMonstrinho);
+      console.log(`✅ ${novoMonstrinho.nome} foi adicionado à equipe de ${this.nome}!`);
+      if (this.ativos.length < 2) this.ativos.push(novoMonstrinho);
+    } else {
+      // Equipe cheia
+      if (trocarPor) {
+        const index = this.equipe.indexOf(trocarPor);
+        if (index !== -1) {
+          this.armazenamento.push(trocarPor);
+          this.equipe[index] = novoMonstrinho;
+          
+          // Se o que foi trocado estava ativo, o novo assume o lugar
+          const indexAtivo = this.ativos.indexOf(trocarPor);
+          if (indexAtivo !== -1) this.ativos[indexAtivo] = novoMonstrinho;
+          
+          console.log(`🔄 ${novoMonstrinho.nome} entrou na equipe. ${trocarPor.nome} foi para o armazenamento.`);
+        }
+      } else {
+        this.armazenamento.push(novoMonstrinho);
+        console.log(`📦 Equipe cheia! ${novoMonstrinho.nome} foi enviado para o armazenamento.`);
+      }
+    }
   }
 
   public todosDesmaiaram(): boolean {
     return this.equipe.every(m => m.getVida() <= 0);
   }
+
+  // --- Gestão de Batalha e Trocas ---
+  public trocarMonstrinho(antigo: Monstrinho, novo: Monstrinho): boolean {
+    if (antigo.temEstado(Estado.LAMA)) {
+      console.log(`❌ ${antigo.nome} está preso pela Lama e não pode ser trocado!`);
+      return false;
+    }
+    const index = this.ativos.indexOf(antigo);
+    if (index === -1) return false;
+    if (novo.getVida() <= 0) {
+      console.log(`❌ ${novo.nome} está desmaiado!`);
+      return false;
+    }
+    this.ativos[index] = novo;
+    return true;
+  }
+
+  public substituirDesmaiado(desmaiado: Monstrinho, substituto: Monstrinho): boolean {
+    const index = this.ativos.indexOf(desmaiado);
+    if (index === -1) return false;
+    if (substituto.getVida() > 0) {
+      this.ativos[index] = substituto;
+      return true;
+    }
+    return false;
+  }
+
+  // --- Gestão de Itens ---
+  public adicionarItem(item: Item): void {
+    this.mochila.push(item);
+  }
+
+  public usarItem(item: Item, alvo: Monstrinho, ataqueAlvo?: Ataque): boolean {
+    const index = this.mochila.indexOf(item);
+    if (index === -1) {
+      console.log(`❌ ${this.nome} não tem ${item.nome} na mochila!`);
+      return false;
+    }
+    item.usar(alvo, ataqueAlvo);
+    this.mochila.splice(index, 1);
+    return true;
+  }
+
+  // --- Evolução ---
+  public verificarEvolucoes(): void {
+    for (let i = 0; i < this.equipe.length; i++) {
+      const monstrinhoAtual = this.equipe[i];
+      const evoluido = monstrinhoAtual.evoluir();
+      
+      if (evoluido) {
+        evoluido.restaurarEstado(monstrinhoAtual.getVida(), monstrinhoAtual.getExperiencia());
+        this.equipe[i] = evoluido;
+        
+        const indexAtivo = this.ativos.indexOf(monstrinhoAtual);
+        if (indexAtivo !== -1) this.ativos[indexAtivo] = evoluido;
+
+        console.log(`🌟 UAU! ${monstrinhoAtual.nome} evoluiu para ${evoluido.nome}!`);
+      }
+    }
+  }
 }
 
 // ==========================================
-// 7. SISTEMA DE AÇÕES
+// 7. CRIAÇÃO DOS ITENS DEFINIDOS
+// ==========================================
+export const PocaoInicial = new Item("Poção Inicial", (alvo) => alvo.curar(10));
+export const PocaoIntermediaria = new Item("Poção Intermediária", (alvo) => alvo.curar(20));
+export const PocaoAvancada = new Item("Poção Avançada", (alvo) => alvo.curar(40));
+
+export const Vitalizador = new Item("Vitalizador", (alvo, ataque) => {
+  if (ataque) {
+    ataque.restaurarPP();
+    console.log(`   -> PP de ${ataque.getNome()} totalmente restaurado!`);
+  } else {
+    console.log("   -> Nenhum ataque específico foi selecionado.");
+  }
+});
+
+export const VitalizadorSupremo = new Item("Vitalizador Supremo", (alvo) => {
+  alvo.restaurarTodosPP();
+  console.log(`   -> Todos os PP de ${alvo.nome} foram restaurados!`);
+});
+
+
+// ==========================================
+// 8. SISTEMA DE AÇÕES
 // ==========================================
 export interface Acao {
   prioridade: number;
@@ -345,12 +469,10 @@ export class AcaoAtacar implements Acao {
       console.log(`❌ ${this.usuario.nome} não pode atacar!`);
       return;
     }
-    
     if (!this.ataque.temPP()) {
       console.log(`❌ ${this.usuario.nome} tentou usar ${this.ataque.getNome()}, mas não tem mais PP!`);
       return;
     }
-
     this.ataque.consumirPP();
     batalha.processarAtaque(this.usuario, this.alvo, this.ataque);
   }
@@ -358,36 +480,31 @@ export class AcaoAtacar implements Acao {
 
 export class AcaoTrocar implements Acao {
   prioridade = 3;
-
   constructor(
     public usuario: Treinador,
     public antigoMonstrinho: Monstrinho,
     public novoMonstrinho: Monstrinho
   ) {}
-
   executar(batalha: Batalha): void {
     this.usuario.trocarMonstrinho(this.antigoMonstrinho, this.novoMonstrinho);
-    console.log(`🔄 ${this.usuario.nome} trocou ${this.antigoMonstrinho.nome} por ${this.novoMonstrinho.nome}!`);
   }
 }
 
 export class AcaoItem implements Acao {
   prioridade = 2;
-
   constructor(
     public usuario: Treinador,
-    public item: any, 
-    public alvo: Monstrinho
+    public item: Item, 
+    public alvo: Monstrinho,
+    public ataqueAlvo?: Ataque // Opcional para o Vitalizador
   ) {}
-
   executar(batalha: Batalha): void {
-    this.usuario.usarItem(this.item, this.alvo);
-    console.log(`🎒 ${this.usuario.nome} usou um item em ${this.alvo.nome}!`);
+    this.usuario.usarItem(this.item, this.alvo, this.ataqueAlvo);
   }
 }
 
 // ==========================================
-// 8. GERENCIADOR DE REAÇÕES
+// 9. GERENCIADOR DE REAÇÕES
 // ==========================================
 export class GerenciadorDeReacoes {
   public static processarReacao(elementoAplicado: Elemento, elementoNovo: Elemento, alvo: Monstrinho, atacante: Monstrinho): void {
@@ -417,7 +534,7 @@ export class GerenciadorDeReacoes {
 }
 
 // ==========================================
-// 9. CLASSE BATALHA
+// 10. CLASSE BATALHA
 // ==========================================
 export class Batalha {
   private filaDeAcoes: Acao[] = [];
@@ -435,7 +552,6 @@ export class Batalha {
   public resolverTurno(): void {
     if (this.estado === "Finalizada") return;
 
-    // Ordena por Prioridade (Maior primeiro) e depois por Velocidade (Maior primeiro)
     this.filaDeAcoes.sort((a, b) => {
       if (a.prioridade !== b.prioridade) {
         return b.prioridade - a.prioridade;
@@ -445,7 +561,6 @@ export class Batalha {
       return velB - velA;
     });
 
-    // Executa todas as ações
     for (const acao of this.filaDeAcoes) {
       if (this.estado === "Finalizada") break;
       acao.executar(this);
@@ -462,18 +577,15 @@ export class Batalha {
     for (const defensor of alvos) {
       if (defensor.getVida() <= 0) continue;
 
-      // Teste de precisão
       if (Math.random() * 100 > ataque.getPrecisao()) {
         console.log(`❌ ${atacante.nome} errou o ataque ${ataque.getNome()} em ${defensor.nome}!`);
         continue;
       }
 
-      // Calcula Dano
       const dano = this.calcularDano(atacante, defensor, ataque);
       defensor.receberDano(dano);
       console.log(`⚔️  ${atacante.nome} causou ${dano} de dano em ${defensor.nome} com ${ataque.getNome()}!`);
 
-      // Aplica Elemento e testa reação
       const combinacao = defensor.aplicarElemento(ataque.getElemento());
       
       if (combinacao) {
@@ -488,25 +600,20 @@ export class Batalha {
     const ataqueStat = atacante.getAtaque();
     const defesaStat = defensor.getDefesa();
 
-    // Fórmula Base
     let danoBase = ((((2 * nivel / 5) + 2) * poder * ataqueStat) / defesaStat) / 50 + 2;
 
-    // STAB
     if (ataque.getElemento() === atacante.getElementoInerente()) {
       danoBase *= 1.5; 
     }
 
-    // Efetividade
     const efetividade = TabelaEfetividade[ataque.getElemento()]?.[defensor.getElementoInerente()] ?? 1;
     danoBase *= efetividade;
 
-    // Crítico (10%)
     if (Math.random() < 0.1) {
       danoBase *= 1.5; 
       console.log("🔥 Foi um acerto crítico!");
     }
 
-    // Roll (Variação de 0.85 a 1.0)
     const roll = Math.random() * 0.15 + 0.85; 
     danoBase *= roll;
 
@@ -519,12 +626,12 @@ export class Batalha {
         if (m.getVida() <= 0) return;
         
         if (m.temEstado(Estado.QUEIMADO)) {
-          const dano = Math.floor(m.getVidaMaxima() * 0.05); // 5% do max
+          const dano = Math.floor(m.getVidaMaxima() * 0.05);
           m.receberDano(dano);
           console.log(`🔥 ${m.nome} sofreu ${dano} de dano por Queimadura.`);
         }
         if (m.temEstado(Estado.SANGRANDO)) {
-          const dano = Math.floor(m.getVidaMaxima() * 0.05); // 5% do max (se tiver stacks, multiplicaria aqui)
+          const dano = Math.floor(m.getVidaMaxima() * 0.05);
           m.receberDano(dano);
           console.log(`🩸 ${m.nome} sofreu ${dano} de dano por Sangramento.`);
         }
@@ -540,9 +647,9 @@ export class Batalha {
       this.estado = "Finalizada";
       console.log("\n🏁 === A BATALHA TERMINOU! === 🏁");
 
-      // Limpa os buffs/debuffs de batalha de todos os monstrinhos
       const resetarEquipe = (treinador: Treinador) => {
         treinador.equipe.forEach(monstrinho => monstrinho.resetarAposBatalha());
+        treinador.ativos.forEach(monstrinho => monstrinho.resetarAposBatalha());
       };
 
       resetarEquipe(this.treinador1);
