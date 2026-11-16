@@ -20,16 +20,19 @@ export enum Estado {
   CONGELADO = "Congelado",
   DORMINDO = "Dormindo",
   CONFUSO = "Confuso",
-  LAMA = "Lama", // Impede troca
+  LAMA = "Lama",
   QUEIMADO = "Queimado",
   SANGRANDO = "Sangrando"
 }
 
+// ==========================================
+// 2. TABELAS DE REGRAS
+// ==========================================
+
 // Tabela 1: Efetividade de Dano (Atacante -> Defensor)
-// 2 = Super efetivo, 0.5 = Pouco efetivo, 1 = Normal
 export const TabelaEfetividade: Record<Elemento, Record<Elemento, number>> = {
   [Elemento.FOGO]: { [Elemento.AGUA]: 0.5, [Elemento.PLANTA]: 2, [Elemento.PEDRA]: 0.5 } as any,
-  [Elemento.AGUA]: { [Elemento.FOGO]: 2, [Elemento.PLANTA]: 0.5, [Elemento.ELETRICO]: 0.5 } as any,
+  [Elemento.AGUA]: { [Elemento.FOGO]: 2, [Elemento.PLANTA]: 0.5, [Elemento.PEDRA]: 2, [Elemento.ELETRICO]: 0.5 } as any,
   [Elemento.PLANTA]: { [Elemento.FOGO]: 0.5, [Elemento.AGUA]: 2, [Elemento.PEDRA]: 2 } as any,
   [Elemento.PEDRA]: { [Elemento.FOGO]: 2, [Elemento.AGUA]: 0.5, [Elemento.PLANTA]: 0.5 } as any,
   [Elemento.ELETRICO]: { [Elemento.AGUA]: 2, [Elemento.PLANTA]: 0.5, [Elemento.PEDRA]: 0.5 } as any,
@@ -50,65 +53,80 @@ export const TabelaReacoes: Record<string, string> = {
   [`${Elemento.ELETRICO}_${Elemento.PEDRA}`]: "Condutividade",
   [`${Elemento.VENTO}_${Elemento.FOGO}`]: "Redemoinho",
   [`${Elemento.FOGO}_${Elemento.VENTO}`]: "Dissipa",
-  // ... Preencher o restante conforme a imagem 2
+  [`${Elemento.AGUA}_${Elemento.PEDRA}`]: "Lama",
+  [`${Elemento.PEDRA}_${Elemento.AGUA}`]: "Lama",
+  [`${Elemento.AGUA}_${Elemento.ELETRICO}`]: "Confusao",
+  [`${Elemento.ELETRICO}_${Elemento.AGUA}`]: "Confusao",
+  [`${Elemento.AGUA}_${Elemento.GELO}`]: "Congelamento",
+  [`${Elemento.GELO}_${Elemento.AGUA}`]: "Congelamento",
+  // ... Outras reações serão adicionadas conforme formos expandindo
 };
 
 // ==========================================
-// 2. CLASSE ATAQUE
+// 3. CLASSE ATAQUE
 // ==========================================
 export class Ataque {
+  private ppAtual: number;
+
   constructor(
     private readonly nome: string,
     private readonly poderBase: number,
     private readonly precisao: number,
-    private readonly custoMana: number,
+    private readonly ppMaximo: number,
     private readonly elemento: Elemento,
     private readonly isMultiTarget: boolean = false
-  ) {}
+  ) {
+    this.ppAtual = ppMaximo;
+  }
 
   public getNome(): string { return this.nome; }
   public getPoderBase(): number { return this.poderBase; }
   public getPrecisao(): number { return this.precisao; }
-  public getCustoMana(): number { return this.custoMana; }
+  public getPPAtual(): number { return this.ppAtual; }
+  public getPPMaximo(): number { return this.ppMaximo; }
   public getElemento(): Elemento { return this.elemento; }
   public isMultiTargetAtaque(): boolean { return this.isMultiTarget; }
+
+  public temPP(): boolean { return this.ppAtual > 0; }
+  public consumirPP(): void { if (this.ppAtual > 0) this.ppAtual--; }
+  public restaurarPP(): void { this.ppAtual = this.ppMaximo; }
 }
 
 // ==========================================
-// 3. CLASSE MONSTRINHO (Com novas regras de XP)
+// 4. CLASSE ABSTRATA MONSTRINHO
 // ==========================================
-export class Monstrinho {
-  private vidaAtual: number;
-  private manaAtual: number;
-  private ataques: Ataque[] = [];
-  private elementosAplicados: Elemento[] = [];
-  private estados: Estado[] = [];
+export abstract class Monstrinho {
+  protected vidaAtual: number;
+  protected ataques: Ataque[] = [];
+  protected elementosAplicados: Elemento[] = [];
+  protected estados: Estado[] = [];
+  
+  // Modificadores temporários de batalha
+  protected modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
 
   constructor(
     public readonly nome: string,
-    private readonly elementoInerente: Elemento,
-    private vidaMaxima: number,
-    private manaMaxima: number,
-    private ataque: number,
-    private defesa: number,
-    private velocidade: number,
-    private precisao: number,
-    private nivel: number = 1,
-    private experiencia: number = 0
+    protected readonly elementoInerente: Elemento,
+    protected vidaMaxima: number,
+    protected ataque: number,
+    protected defesa: number,
+    protected velocidade: number,
+    protected precisao: number,
+    protected nivel: number = 1,
+    protected experiencia: number = 0
   ) {
     this.vidaAtual = vidaMaxima;
-    this.manaAtual = manaMaxima;
   }
 
-  // --- Getters Básicos ---
+  public abstract evoluir(): Monstrinho | null;
+
+  // --- Getters (Aplicam modificadores temporários) ---
   public getVida(): number { return this.vidaAtual; }
   public getVidaMaxima(): number { return this.vidaMaxima; }
-  public getMana(): number { return this.manaAtual; }
-  public getManaMaxima(): number { return this.manaMaxima; }
-  public getAtaque(): number { return this.ataque; }
-  public getDefesa(): number { return this.defesa; }
-  public getVelocidade(): number { return this.velocidade; }
-  public getPrecisao(): number { return this.precisao; }
+  public getAtaque(): number { return Math.floor(this.ataque * this.modificadores.ataque); }
+  public getDefesa(): number { return Math.floor(this.defesa * this.modificadores.defesa); }
+  public getVelocidade(): number { return Math.floor(this.velocidade * this.modificadores.velocidade); }
+  public getPrecisao(): number { return Math.floor(this.precisao * this.modificadores.precisao); }
   public getElementoInerente(): Elemento { return this.elementoInerente; }
   public getNivel(): number { return this.nivel; }
   public getExperiencia(): number { return this.experiencia; }
@@ -116,77 +134,40 @@ export class Monstrinho {
   public getElementosAplicados(): Elemento[] { return this.elementosAplicados; }
   public getEstados(): Estado[] { return this.estados; }
 
-  // --- Métodos de Vida e Mana ---
-  public receberDano(valor: number): void {
-    this.vidaAtual = Math.max(0, this.vidaAtual - valor);
-  }
-
-  public curar(valor: number): void {
-    this.vidaAtual = Math.min(this.vidaMaxima, this.vidaAtual + valor);
-  }
-
-  public gastarMana(valor: number): boolean {
-    if (this.manaAtual >= valor) {
-      this.manaAtual -= valor;
-      return true;
-    }
-    return false;
-  }
-
-  public recuperarMana(valor: number): void {
-    this.manaAtual = Math.min(this.manaMaxima, this.manaAtual + valor);
+  // --- Métodos de Vida ---
+  public receberDano(valor: number): void { this.vidaAtual = Math.max(0, this.vidaAtual - valor); }
+  public curar(valor: number): void { this.vidaAtual = Math.min(this.vidaMaxima, this.vidaAtual + valor); }
+  public aplicarModificador(status: 'ataque' | 'defesa' | 'velocidade' | 'precisao', multiplicador: number): void {
+    this.modificadores[status] *= multiplicador;
   }
 
   // --- Métodos de Ataque e Nível ---
   public aprenderAtaque(ataque: Ataque): void {
-    if (this.ataques.length < 4) {
-      this.ataques.push(ataque);
-    } else {
-      throw new Error("O monstrinho já possui 4 ataques. Esqueça um para aprender outro.");
-    }
+    if (this.ataques.length < 4) this.ataques.push(ataque);
+    else throw new Error("O monstrinho já possui 4 ataques.");
   }
 
-  // Nova regra de XP e Level Up
   public ganharExperiencia(valor: number): void {
-    if (this.nivel >= 30) return; // Nível máximo
-
+    if (this.nivel >= 30) return;
     this.experiencia += valor;
     
-    // Fórmula: XP necessário = 5 * (nível atual + 1)
-    // Nível 1 -> 2 precisa de 10 (5 * 2)
-    // Nível 2 -> 3 precisa de 15 (5 * 3)
     while (this.nivel < 30) {
       const xpNecessario = 5 * (this.nivel + 1);
-      
       if (this.experiencia >= xpNecessario) {
         this.experiencia -= xpNecessario;
-        this.subirNivel();
-      } else {
-        break;
-      }
+        this.nivel++;
+        this.vidaMaxima += 5;
+        this.ataque += 2;
+        this.defesa += 2;
+        this.velocidade += 1;
+        this.vidaAtual = this.vidaMaxima; // Restaura vida ao upar
+      } else break;
     }
-  }
-
-  private subirNivel(): void {
-    this.nivel++;
-    // Aumento básico de atributos a cada nível (pode ser balanceado depois)
-    this.vidaMaxima += 5;
-    this.ataque += 2;
-    this.defesa += 2;
-    this.velocidade += 1;
-    this.manaMaxima += 2;
-    
-    // Restaura vida e mana ao upar (opcional, mas comum em RPGs)
-    this.vidaAtual = this.vidaMaxima;
-    this.manaAtual = this.manaMaxima;
-    
-    console.log(`${this.nome} subiu para o nível ${this.nivel}!`);
   }
 
   // --- Métodos de Elementos e Reações ---
   public aplicarElemento(elemento: Elemento): Elemento[] | null {
     this.elementosAplicados.push(elemento);
-
     if (this.elementosAplicados.length === 2) {
       const combinacao = [...this.elementosAplicados];
       this.limparElementos();
@@ -195,44 +176,154 @@ export class Monstrinho {
     return null;
   }
 
-  public limparElementos(): void {
-    this.elementosAplicados = [];
-  }
+  public limparElementos(): void { this.elementosAplicados = []; }
 
   // --- Métodos de Estados ---
-  public adicionarEstado(estado: Estado): void {
-    if (!this.estados.includes(estado)) {
-      this.estados.push(estado);
-    }
-  }
+  public adicionarEstado(estado: Estado): void { if (!this.estados.includes(estado)) this.estados.push(estado); }
+  public removerEstado(estado: Estado): void { this.estados = this.estados.filter(e => e !== estado); }
+  public temEstado(estado: Estado): boolean { return this.estados.includes(estado); }
 
-  public removerEstado(estado: Estado): void {
-    this.estados = this.estados.filter(e => e !== estado);
-  }
-
-  public temEstado(estado: Estado): boolean {
-    return this.estados.includes(estado);
-  }
-
-  public restaurarEstado(vida: number, experiencia: number, mana: number = this.manaMaxima): void {
-    this.vidaAtual = vida;
-    this.experiencia = experiencia;
-    this.manaAtual = mana;
+  public resetarAposBatalha(): void {
+    this.modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
+    this.limparElementos();
+    this.estados = []; 
   }
 }
 
 // ==========================================
-// 4. STUBS (Classes temporárias para não dar erro)
+// 5. POKEDEX (CLASSES ESPECÍFICAS)
+// ==========================================
+
+// --- FOGO ---
+export class Frilizard extends Monstrinho {
+  constructor(nivel = 1) { super("Frilizard", Elemento.FOGO, 28, 18, 10, 14, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Flareperor() : null; }
+}
+export class Flareperor extends Monstrinho {
+  constructor() { super("Flareperor", Elemento.FOGO, 55, 40, 15, 30, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- GRAMA ---
+export class Verdalisk extends Monstrinho {
+  constructor(nivel = 1) { super("Verdalisk", Elemento.PLANTA, 40, 8, 15, 7, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Katanlisk() : null; }
+}
+export class Katanlisk extends Monstrinho {
+  constructor() { super("Katanlisk", Elemento.PLANTA, 80, 18, 32, 10, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- PEDRA ---
+export class Lithoscorp extends Monstrinho {
+  constructor(nivel = 1) { super("Lithoscorp", Elemento.PEDRA, 42, 10, 16, 2, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Rockpion() : null; }
+}
+export class Rockpion extends Monstrinho {
+  constructor() { super("Rockpion", Elemento.PEDRA, 80, 25, 30, 5, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- ELÉTRICO ---
+export class Amperell extends Monstrinho {
+  constructor(nivel = 1) { super("Amperell", Elemento.ELETRICO, 24, 16, 8, 22, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Electrusa() : null; }
+}
+export class Electrusa extends Monstrinho {
+  constructor() { super("Electrusa", Elemento.ELETRICO, 50, 35, 15, 40, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- VENTO ---
+export class Zephyling extends Monstrinho {
+  constructor(nivel = 1) { super("Zephyling", Elemento.VENTO, 26, 10, 8, 26, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Hurrihawk() : null; }
+}
+export class Hurrihawk extends Monstrinho {
+  constructor() { super("Hurrihawk", Elemento.VENTO, 50, 20, 15, 55, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- GELO ---
+export class Glaceow extends Monstrinho {
+  constructor(nivel = 1) { super("Glaceow", Elemento.GELO, 35, 15, 12, 8, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Glacielle() : null; }
+}
+export class Glacielle extends Monstrinho {
+  constructor() { super("Glacielle", Elemento.GELO, 65, 30, 25, 20, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- ÁGUA ---
+export class Ocelly extends Monstrinho {
+  constructor(nivel = 1) { super("Ocelly", Elemento.AGUA, 38, 10, 14, 8, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Jellerinna() : null; }
+}
+export class Jellerinna extends Monstrinho {
+  constructor() { super("Jellerinna", Elemento.AGUA, 75, 20, 30, 15, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- MÍSTICO ---
+export class FizzyJr extends Monstrinho {
+  constructor(nivel = 1) { super("Fizzy Jr.", Elemento.MISTICO, 32, 14, 12, 12, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Fizzarolly() : null; }
+}
+export class Fizzarolly extends Monstrinho {
+  constructor() { super("Fizzarolly", Elemento.MISTICO, 60, 30, 25, 25, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- LUZ ---
+export class Lumi extends Monstrinho {
+  constructor(nivel = 1) { super("Lumi", Elemento.LUZ, 34, 10, 14, 12, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Celestina() : null; }
+}
+export class Celestina extends Monstrinho {
+  constructor() { super("Celestina", Elemento.LUZ, 65, 20, 30, 25, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// --- ESCURIDÃO ---
+export class Lumiel extends Monstrinho {
+  constructor(nivel = 1) { super("Lumiel", Elemento.ESCURIDAO, 30, 16, 10, 14, 100, nivel); }
+  public evoluir(): Monstrinho | null { return this.nivel >= 15 ? new Shadenight() : null; }
+}
+export class Shadenight extends Monstrinho {
+  constructor() { super("Shadenight", Elemento.ESCURIDAO, 55, 35, 20, 30, 100, 15); }
+  public evoluir(): Monstrinho | null { return null; }
+}
+
+// ==========================================
+// 6. TREINADOR (Base para os testes funcionarem)
 // ==========================================
 export class Treinador {
-  constructor(public nome: string, public equipe: Monstrinho[]) {}
-  public trocarMonstrinho(novo: Monstrinho) { /* Implementar depois */ }
-  public usarItem(item: any, alvo: Monstrinho) { /* Implementar depois */ }
-  public todosDesmaiaram(): boolean { return this.equipe.every(m => m.getVida() <= 0); }
+  public ativos: Monstrinho[] = [];
+
+  constructor(
+    public nome: string, 
+    public equipe: Monstrinho[]
+  ) {
+    // Coloca os dois primeiros vivos como ativos
+    this.ativos = this.equipe.slice(0, 2);
+  }
+
+  public trocarMonstrinho(antigo: Monstrinho, novo: Monstrinho) {
+    const index = this.ativos.indexOf(antigo);
+    if (index !== -1) this.ativos[index] = novo;
+  }
+
+  public usarItem(item: any, alvo: Monstrinho) {
+    // Implementaremos a lógica de itens depois
+  }
+
+  public todosDesmaiaram(): boolean {
+    return this.equipe.every(m => m.getVida() <= 0);
+  }
 }
 
 // ==========================================
-// 5. SISTEMA DE AÇÕES (Polimorfismo)
+// 7. SISTEMA DE AÇÕES
 // ==========================================
 export interface Acao {
   prioridade: number;
@@ -251,30 +342,32 @@ export class AcaoAtacar implements Acao {
 
   executar(batalha: Batalha): void {
     if (this.usuario.temEstado(Estado.DORMINDO) || this.usuario.temEstado(Estado.CONGELADO)) {
-      console.log(`${this.usuario.nome} não pode atacar!`);
+      console.log(`❌ ${this.usuario.nome} não pode atacar!`);
       return;
     }
     
-    if (!this.usuario.gastarMana(this.ataque.getCustoMana())) {
-      console.log(`${this.usuario.nome} não tem mana suficiente!`);
+    if (!this.ataque.temPP()) {
+      console.log(`❌ ${this.usuario.nome} tentou usar ${this.ataque.getNome()}, mas não tem mais PP!`);
       return;
     }
 
+    this.ataque.consumirPP();
     batalha.processarAtaque(this.usuario, this.alvo, this.ataque);
   }
 }
 
 export class AcaoTrocar implements Acao {
-  prioridade = 3; // Maior prioridade
+  prioridade = 3;
 
   constructor(
     public usuario: Treinador,
+    public antigoMonstrinho: Monstrinho,
     public novoMonstrinho: Monstrinho
   ) {}
 
   executar(batalha: Batalha): void {
-    this.usuario.trocarMonstrinho(this.novoMonstrinho);
-    console.log(`${this.usuario.nome} trocou para ${this.novoMonstrinho.nome}!`);
+    this.usuario.trocarMonstrinho(this.antigoMonstrinho, this.novoMonstrinho);
+    console.log(`🔄 ${this.usuario.nome} trocou ${this.antigoMonstrinho.nome} por ${this.novoMonstrinho.nome}!`);
   }
 }
 
@@ -289,12 +382,12 @@ export class AcaoItem implements Acao {
 
   executar(batalha: Batalha): void {
     this.usuario.usarItem(this.item, this.alvo);
-    console.log(`${this.usuario.nome} usou um item em ${this.alvo.nome}!`);
+    console.log(`🎒 ${this.usuario.nome} usou um item em ${this.alvo.nome}!`);
   }
 }
 
 // ==========================================
-// 6. GERENCIADOR DE REAÇÕES
+// 8. GERENCIADOR DE REAÇÕES
 // ==========================================
 export class GerenciadorDeReacoes {
   public static processarReacao(elementoAplicado: Elemento, elementoNovo: Elemento, alvo: Monstrinho, atacante: Monstrinho): void {
@@ -303,26 +396,28 @@ export class GerenciadorDeReacoes {
 
     if (!nomeReacao) return; 
 
-    console.log(`Reação ativada em ${alvo.nome}: ${nomeReacao}!`);
+    console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: ${nomeReacao}!`);
 
     switch (nomeReacao) {
       case "Vaporizacao":
-        // Exemplo simplificado
-        alvo.adicionarEstado(Estado.NORMAL); 
+        alvo.aplicarModificador('defesa', 0.8); 
+        console.log(`   -> Defesa de ${alvo.nome} reduziu!`);
         break;
       case "Queimadura":
         alvo.adicionarEstado(Estado.QUEIMADO);
+        console.log(`   -> ${alvo.nome} está queimando!`);
         break;
       case "Dissipa":
+        console.log(`   -> O vento dissipou os elementos!`);
         break;
       default:
-        console.log(`Efeito de ${nomeReacao} ainda não implementado mecanicamente.`);
+        console.log(`   -> Efeito de ${nomeReacao} ainda não implementado mecanicamente.`);
     }
   }
 }
 
 // ==========================================
-// 7. CLASSE BATALHA
+// 9. CLASSE BATALHA
 // ==========================================
 export class Batalha {
   private filaDeAcoes: Acao[] = [];
@@ -340,15 +435,17 @@ export class Batalha {
   public resolverTurno(): void {
     if (this.estado === "Finalizada") return;
 
+    // Ordena por Prioridade (Maior primeiro) e depois por Velocidade (Maior primeiro)
     this.filaDeAcoes.sort((a, b) => {
       if (a.prioridade !== b.prioridade) {
         return b.prioridade - a.prioridade;
       }
-      const velA = a.usuario instanceof Monstrinho ? a.usuario.getVelocidade() : 0;
-      const velB = b.usuario instanceof Monstrinho ? b.usuario.getVelocidade() : 0;
+      const velA = a.usuario instanceof Monstrinho ? a.usuario.getVelocidade() : 999;
+      const velB = b.usuario instanceof Monstrinho ? b.usuario.getVelocidade() : 999;
       return velB - velA;
     });
 
+    // Executa todas as ações
     for (const acao of this.filaDeAcoes) {
       if (this.estado === "Finalizada") break;
       acao.executar(this);
@@ -363,15 +460,20 @@ export class Batalha {
     const alvos = Array.isArray(alvo) ? alvo : [alvo];
 
     for (const defensor of alvos) {
+      if (defensor.getVida() <= 0) continue;
+
+      // Teste de precisão
       if (Math.random() * 100 > ataque.getPrecisao()) {
-        console.log(`${atacante.nome} errou o ataque ${ataque.getNome()} em ${defensor.nome}!`);
+        console.log(`❌ ${atacante.nome} errou o ataque ${ataque.getNome()} em ${defensor.nome}!`);
         continue;
       }
 
+      // Calcula Dano
       const dano = this.calcularDano(atacante, defensor, ataque);
       defensor.receberDano(dano);
-      console.log(`${atacante.nome} causou ${dano} de dano em ${defensor.nome}!`);
+      console.log(`⚔️  ${atacante.nome} causou ${dano} de dano em ${defensor.nome} com ${ataque.getNome()}!`);
 
+      // Aplica Elemento e testa reação
       const combinacao = defensor.aplicarElemento(ataque.getElemento());
       
       if (combinacao) {
@@ -386,37 +488,65 @@ export class Batalha {
     const ataqueStat = atacante.getAtaque();
     const defesaStat = defensor.getDefesa();
 
-    let danoBase = ((((2 * nivel / 5) + 2) * poder * (ataqueStat / defesaStat)) / 50) + 2;
+    // Fórmula Base
+    let danoBase = ((((2 * nivel / 5) + 2) * poder * ataqueStat) / defesaStat) / 50 + 2;
 
+    // STAB
     if (ataque.getElemento() === atacante.getElementoInerente()) {
-      danoBase *= 1.5; // STAB
+      danoBase *= 1.5; 
     }
 
+    // Efetividade
     const efetividade = TabelaEfetividade[ataque.getElemento()]?.[defensor.getElementoInerente()] ?? 1;
     danoBase *= efetividade;
 
+    // Crítico (10%)
     if (Math.random() < 0.1) {
-      danoBase *= 1.5; // Crítico
-      console.log("Foi um acerto crítico!");
+      danoBase *= 1.5; 
+      console.log("🔥 Foi um acerto crítico!");
     }
 
-    const roll = Math.random() * 0.15 + 0.85; // Variação de 0.85 a 1.0
+    // Roll (Variação de 0.85 a 1.0)
+    const roll = Math.random() * 0.15 + 0.85; 
     danoBase *= roll;
 
     return Math.floor(danoBase);
   }
 
   private processarEfeitosFimDeTurno(): void {
-    // Lógica para Queimadura, Sangramento, etc.
+    const processarStatus = (treinador: Treinador) => {
+      treinador.equipe.forEach(m => {
+        if (m.getVida() <= 0) return;
+        
+        if (m.temEstado(Estado.QUEIMADO)) {
+          const dano = Math.floor(m.getVidaMaxima() * 0.05); // 5% do max
+          m.receberDano(dano);
+          console.log(`🔥 ${m.nome} sofreu ${dano} de dano por Queimadura.`);
+        }
+        if (m.temEstado(Estado.SANGRANDO)) {
+          const dano = Math.floor(m.getVidaMaxima() * 0.05); // 5% do max (se tiver stacks, multiplicaria aqui)
+          m.receberDano(dano);
+          console.log(`🩸 ${m.nome} sofreu ${dano} de dano por Sangramento.`);
+        }
+      });
+    };
+
+    processarStatus(this.treinador1);
+    processarStatus(this.treinador2);
   }
 
   private verificarFimDeJogo(): void {
     if (this.treinador1.todosDesmaiaram() || this.treinador2.todosDesmaiaram()) {
       this.estado = "Finalizada";
-      console.log("A batalha terminou!");
+      console.log("\n🏁 === A BATALHA TERMINOU! === 🏁");
+
+      // Limpa os buffs/debuffs de batalha de todos os monstrinhos
+      const resetarEquipe = (treinador: Treinador) => {
+        treinador.equipe.forEach(monstrinho => monstrinho.resetarAposBatalha());
+      };
+
+      resetarEquipe(this.treinador1);
+      resetarEquipe(this.treinador2);
     }
-  }
-}
-    this.manaAtual = mana;
   }
 }
