@@ -587,7 +587,7 @@ export class Treinador {
   public ativos: Monstrinho[] = [];
   public mochila: Item[] = [];
   public armazenamento: Monstrinho[] = [];
-  public isSelvagem: boolean = false; // NOVO: Identificador de treinador selvagem
+  public isSelvagem: boolean = false;
 
   constructor(public readonly nome: string, public equipe: Monstrinho[] = []) {
     this.atualizarAtivosIniciais();
@@ -595,6 +595,21 @@ export class Treinador {
 
   private atualizarAtivosIniciais(): void {
     this.ativos = this.equipe.filter(m => m.getVida() > 0).slice(0, 2);
+  }
+
+  // NOVO MÉTODO: Reorganizar a ordem dos monstrinhos na equipe
+  public reorganizarEquipe(indexOrigem: number, indexDestino: number): boolean {
+    if (indexOrigem < 0 || indexOrigem >= this.equipe.length || 
+        indexDestino < 0 || indexDestino >= this.equipe.length) {
+      return false;
+    }
+
+    const monstrinho = this.equipe[indexOrigem];
+    this.equipe.splice(indexOrigem, 1);
+    this.equipe.splice(indexDestino, 0, monstrinho);
+
+    this.atualizarAtivosIniciais();
+    return true;
   }
 
   public capturarMonstrinho(novoMonstrinho: Monstrinho, trocarPor?: Monstrinho): void {
@@ -680,7 +695,6 @@ export const CapturadorSupremo = new ItemCaptura("Capturador Supremo", 2.0);
 // 8. SISTEMA DE EXPLORAÇÃO
 // ==========================================
 export class GramaAlta {
-  // Tabela de probabilidades baseada nas regras definidas
   private chances: Record<Elemento, number> = {
     [Elemento.LUZ]: 5,
     [Elemento.ESCURIDAO]: 5,
@@ -694,7 +708,6 @@ export class GramaAlta {
     [Elemento.VENTO]: 13.75,
   };
 
-  // Mapeamento para instanciar o monstrinho correto
   private pokedexBase: Record<Elemento, () => Monstrinho> = {
     [Elemento.LUZ]: () => new Lumi(),
     [Elemento.ESCURIDAO]: () => new Lumiel(),
@@ -718,7 +731,7 @@ export class GramaAlta {
         return this.pokedexBase[elemento as Elemento]();
       }
     }
-    return this.pokedexBase[Elemento.FOGO](); // Fallback de segurança
+    return this.pokedexBase[Elemento.FOGO]();
   }
 }
 
@@ -837,7 +850,6 @@ export class Batalha {
   }
 
   public processarCaptura(treinador: Treinador, alvo: Monstrinho, capturador: ItemCaptura): void {
-    // REGRA NOVA: Não é possível capturar monstrinhos de outros treinadores
     const oponente = treinador === this.treinador1 ? this.treinador2 : this.treinador1;
     
     if (!oponente.isSelvagem) {
