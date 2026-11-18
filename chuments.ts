@@ -93,6 +93,15 @@ export class Item {
   }
 }
 
+export class ItemCaptura extends Item {
+  constructor(
+    public readonly nome: string,
+    public readonly bonus: number
+  ) {
+    super(nome, () => {}); 
+  }
+}
+
 // ==========================================
 // 4. CLASSE ABSTRATA MONSTRINHO
 // ==========================================
@@ -103,8 +112,6 @@ export abstract class Monstrinho {
   protected estados: Estado[] = [];
   protected modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
   protected tabelaDeAprendizado: Record<number, Ataque> = {};
-  
-  // NOVO: Armazena um ataque que o monstrinho quer aprender
   protected ataquePendente: Ataque | null = null;
 
   constructor(
@@ -116,7 +123,8 @@ export abstract class Monstrinho {
     protected velocidade: number,
     protected precisao: number,
     protected nivel: number = 1,
-    protected experiencia: number = 0
+    protected experiencia: number = 0,
+    protected taxaCaptura: number = 190
   ) {
     this.vidaAtual = vidaMaxima;
   }
@@ -137,6 +145,7 @@ export abstract class Monstrinho {
   public getElementosAplicados(): Elemento[] { return this.elementosAplicados; }
   public getEstados(): Estado[] { return this.estados; }
   public getAtaquePendente(): Ataque | null { return this.ataquePendente; }
+  public getTaxaCaptura(): number { return this.taxaCaptura; }
 
   // --- Métodos de Vida e Modificadores ---
   public receberDano(valor: number): void { this.vidaAtual = Math.max(0, this.vidaAtual - valor); }
@@ -151,10 +160,9 @@ export abstract class Monstrinho {
       this.ataques.push(ataque);
       return true;
     }
-    return false; // Slot cheio
+    return false; 
   }
 
-  // NOVO: Método para resolver o aprendizado pendente
   public resolverAtaquePendente(indexParaEsquecer: number): boolean {
     if (!this.ataquePendente) return false;
     if (indexParaEsquecer < 0 || indexParaEsquecer >= this.ataques.length) return false;
@@ -162,8 +170,7 @@ export abstract class Monstrinho {
     const ataqueEsquecido = this.ataques[indexParaEsquecer];
     this.ataques[indexParaEsquecer] = this.ataquePendente;
     console.log(`🔄 ${this.nome} esqueceu ${ataqueEsquecido.getNome()} e aprendeu ${this.ataquePendente.getNome()}!`);
-    
-    this.ataquePendente = null; // Limpa o pendente
+    this.ataquePendente = null;
     return true;
   }
 
@@ -187,24 +194,19 @@ export abstract class Monstrinho {
       if (this.experiencia >= xpNecessario) {
         this.experiencia -= xpNecessario;
         this.nivel++;
-        
-        // Aumento de status
         this.vidaMaxima += 5;
         this.ataque += 2;
         this.defesa += 2;
         this.velocidade += 1;
         this.vidaAtual = this.vidaMaxima; 
 
-        // Verifica se aprendeu um ataque novo neste nível
         if (this.tabelaDeAprendizado[this.nivel]) {
           const novoAtaque = this.tabelaDeAprendizado[this.nivel];
-          const conseguiuAprender = this.aprenderAtaque(novoAtaque);
-          
-          if (conseguiuAprender) {
-            console.log(`📚 ${this.nome} subiu para o Nível ${this.nivel} e aprendeu ${novoAtaque.getNome()}!`);
-          } else {
+          if (!this.aprenderAtaque(novoAtaque)) {
             this.ataquePendente = novoAtaque;
             console.log(`⚠️ ${this.nome} subiu para o Nível ${this.nivel} e quer aprender ${novoAtaque.getNome()}, mas já tem 4 ataques!`);
+          } else {
+            console.log(`📚 ${this.nome} subiu para o Nível ${this.nivel} e aprendeu ${novoAtaque.getNome()}!`);
           }
         } else {
           console.log(`⭐ ${this.nome} subiu para o Nível ${this.nivel}!`);
@@ -245,13 +247,13 @@ export abstract class Monstrinho {
 }
 
 // ==========================================
-// 5. POKEDEX E APRENDIZADO DE ATAQUES
+// 5. POKEDEX
 // ==========================================
 
 // --- FOGO ---
 export class Frilizard extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Frilizard", Elemento.FOGO, 28, 18, 10, 14, 100, nivel);
+    super("Frilizard", Elemento.FOGO, 28, 18, 10, 14, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Brasa", 40, 100, 30, Elemento.FOGO),
       3: new Ataque("Presa Ígnea", 50, 100, 25, Elemento.FOGO),
@@ -268,7 +270,7 @@ export class Frilizard extends Monstrinho {
 }
 export class Flareperor extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Flareperor", Elemento.FOGO, 55, 40, 15, 30, 100, nivel);
+    super("Flareperor", Elemento.FOGO, 55, 40, 15, 30, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Fogo do Imperador", 80, 100, 15, Elemento.FOGO),
       18: new Ataque("Explosão de Chamas", 90, 90, 10, Elemento.FOGO),
@@ -284,7 +286,7 @@ export class Flareperor extends Monstrinho {
 // --- ÁGUA ---
 export class Ocelly extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Ocelly", Elemento.AGUA, 38, 10, 14, 8, 100, nivel);
+    super("Ocelly", Elemento.AGUA, 38, 10, 14, 8, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Jato d'Água", 40, 100, 30, Elemento.AGUA),
       3: new Ataque("Bolha", 50, 100, 25, Elemento.AGUA),
@@ -301,7 +303,7 @@ export class Ocelly extends Monstrinho {
 }
 export class Jellerinna extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Jellerinna", Elemento.AGUA, 75, 20, 30, 15, 100, nivel);
+    super("Jellerinna", Elemento.AGUA, 75, 20, 30, 15, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Água Vital", 80, 100, 15, Elemento.AGUA),
       18: new Ataque("Canhão de Água", 90, 90, 10, Elemento.AGUA),
@@ -317,7 +319,7 @@ export class Jellerinna extends Monstrinho {
 // --- PLANTA ---
 export class Verdalisk extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Verdalisk", Elemento.PLANTA, 40, 8, 15, 7, 100, nivel);
+    super("Verdalisk", Elemento.PLANTA, 40, 8, 15, 7, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Chicote de Vinha", 40, 100, 30, Elemento.PLANTA),
       3: new Ataque("Folha Navalha", 50, 100, 25, Elemento.PLANTA),
@@ -334,7 +336,7 @@ export class Verdalisk extends Monstrinho {
 }
 export class Katanlisk extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Katanlisk", Elemento.PLANTA, 80, 18, 32, 10, 100, nivel);
+    super("Katanlisk", Elemento.PLANTA, 80, 18, 32, 10, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Corte Samurai", 80, 100, 15, Elemento.PLANTA),
       18: new Ataque("Bomba de Sementes", 90, 90, 10, Elemento.PLANTA),
@@ -350,7 +352,7 @@ export class Katanlisk extends Monstrinho {
 // --- PEDRA ---
 export class Lithoscorp extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Lithoscorp", Elemento.PEDRA, 42, 10, 16, 2, 100, nivel);
+    super("Lithoscorp", Elemento.PEDRA, 42, 10, 16, 2, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Pedrada", 40, 100, 30, Elemento.PEDRA),
       3: new Ataque("Rocha Afiada", 50, 100, 25, Elemento.PEDRA),
@@ -367,7 +369,7 @@ export class Lithoscorp extends Monstrinho {
 }
 export class Rockpion extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Rockpion", Elemento.PEDRA, 80, 25, 30, 5, 100, nivel);
+    super("Rockpion", Elemento.PEDRA, 80, 25, 30, 5, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Fúria do Titã", 80, 100, 15, Elemento.PEDRA),
       18: new Ataque("Deslizamento", 90, 90, 10, Elemento.PEDRA),
@@ -383,7 +385,7 @@ export class Rockpion extends Monstrinho {
 // --- ELÉTRICO ---
 export class Amperell extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Amperell", Elemento.ELETRICO, 24, 16, 8, 22, 100, nivel);
+    super("Amperell", Elemento.ELETRICO, 24, 16, 8, 22, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Choque do Trovão", 40, 100, 30, Elemento.ELETRICO),
       3: new Ataque("Faísca", 50, 100, 25, Elemento.ELETRICO),
@@ -400,7 +402,7 @@ export class Amperell extends Monstrinho {
 }
 export class Electrusa extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Electrusa", Elemento.ELETRICO, 50, 35, 15, 40, 100, nivel);
+    super("Electrusa", Elemento.ELETRICO, 50, 35, 15, 40, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Medusa Elétrica", 80, 100, 15, Elemento.ELETRICO),
       18: new Ataque("Trovão", 90, 90, 10, Elemento.ELETRICO),
@@ -416,7 +418,7 @@ export class Electrusa extends Monstrinho {
 // --- VENTO ---
 export class Zephyling extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Zephyling", Elemento.VENTO, 26, 10, 8, 26, 100, nivel);
+    super("Zephyling", Elemento.VENTO, 26, 10, 8, 26, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Rajada de Vento", 40, 100, 30, Elemento.VENTO),
       3: new Ataque("Ataque de Asa", 50, 100, 25, Elemento.VENTO),
@@ -433,7 +435,7 @@ export class Zephyling extends Monstrinho {
 }
 export class Hurrihawk extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Hurrihawk", Elemento.VENTO, 50, 20, 15, 55, 100, nivel);
+    super("Hurrihawk", Elemento.VENTO, 50, 20, 15, 55, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Mergulho do Falcão", 80, 100, 15, Elemento.VENTO),
       18: new Ataque("Tempestade de Ar", 90, 90, 10, Elemento.VENTO),
@@ -449,7 +451,7 @@ export class Hurrihawk extends Monstrinho {
 // --- GELO ---
 export class Glaceow extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Glaceow", Elemento.GELO, 35, 15, 12, 8, 100, nivel);
+    super("Glaceow", Elemento.GELO, 35, 15, 12, 8, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Rajada de Gelo", 40, 100, 30, Elemento.GELO),
       3: new Ataque("Vento Gélido", 50, 100, 25, Elemento.GELO),
@@ -466,7 +468,7 @@ export class Glaceow extends Monstrinho {
 }
 export class Glacielle extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Glacielle", Elemento.GELO, 65, 30, 25, 20, 100, nivel);
+    super("Glacielle", Elemento.GELO, 65, 30, 25, 20, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Elegância Glacial", 80, 100, 15, Elemento.GELO),
       18: new Ataque("Zero Absoluto", 90, 90, 10, Elemento.GELO),
@@ -482,7 +484,7 @@ export class Glacielle extends Monstrinho {
 // --- MÍSTICO ---
 export class FizzyJr extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Fizzy Jr.", Elemento.MISTICO, 32, 14, 12, 12, 100, nivel);
+    super("Fizzy Jr.", Elemento.MISTICO, 32, 14, 12, 12, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Onda Mística", 40, 100, 30, Elemento.MISTICO),
       3: new Ataque("Raio Psíquico", 50, 100, 25, Elemento.MISTICO),
@@ -499,7 +501,7 @@ export class FizzyJr extends Monstrinho {
 }
 export class Fizzarolly extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Fizzarolly", Elemento.MISTICO, 60, 30, 25, 25, 100, nivel);
+    super("Fizzarolly", Elemento.MISTICO, 60, 30, 25, 25, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Desejo Arcano", 80, 100, 15, Elemento.MISTICO),
       18: new Ataque("Premonição", 90, 90, 10, Elemento.MISTICO),
@@ -515,7 +517,7 @@ export class Fizzarolly extends Monstrinho {
 // --- LUZ ---
 export class Lumi extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Lumi", Elemento.LUZ, 34, 10, 14, 12, 100, nivel);
+    super("Lumi", Elemento.LUZ, 34, 10, 14, 12, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Luz Sagrada", 40, 100, 30, Elemento.LUZ),
       3: new Ataque("Raio de Sol", 50, 100, 25, Elemento.LUZ),
@@ -532,7 +534,7 @@ export class Lumi extends Monstrinho {
 }
 export class Celestina extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Celestina", Elemento.LUZ, 65, 20, 30, 25, 100, nivel);
+    super("Celestina", Elemento.LUZ, 65, 20, 30, 25, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Bênção Celestial", 80, 100, 15, Elemento.LUZ),
       18: new Ataque("Lança Radiante", 90, 90, 10, Elemento.LUZ),
@@ -548,7 +550,7 @@ export class Celestina extends Monstrinho {
 // --- ESCURIDÃO ---
 export class Lumiel extends Monstrinho {
   constructor(nivel = 1) { 
-    super("Lumiel", Elemento.ESCURIDAO, 30, 16, 10, 14, 100, nivel);
+    super("Lumiel", Elemento.ESCURIDAO, 30, 16, 10, 14, 100, nivel, 0, 190);
     this.tabelaDeAprendizado = {
       1: new Ataque("Mordida Sombria", 40, 100, 30, Elemento.ESCURIDAO),
       3: new Ataque("Pulso Sombrio", 50, 100, 25, Elemento.ESCURIDAO),
@@ -565,7 +567,7 @@ export class Lumiel extends Monstrinho {
 }
 export class Shadenight extends Monstrinho {
   constructor(nivel: number = 15) { 
-    super("Shadenight", Elemento.ESCURIDAO, 55, 35, 20, 30, 100, nivel);
+    super("Shadenight", Elemento.ESCURIDAO, 55, 35, 20, 30, 100, nivel, 0, 45);
     this.tabelaDeAprendizado = {
       15: new Ataque("Abraço do Vampiro", 80, 100, 15, Elemento.ESCURIDAO),
       18: new Ataque("Devorar", 90, 90, 10, Elemento.ESCURIDAO),
@@ -585,6 +587,7 @@ export class Treinador {
   public ativos: Monstrinho[] = [];
   public mochila: Item[] = [];
   public armazenamento: Monstrinho[] = [];
+  public isSelvagem: boolean = false; // NOVO: Identificador de treinador selvagem
 
   constructor(public readonly nome: string, public equipe: Monstrinho[] = []) {
     this.atualizarAtivosIniciais();
@@ -598,6 +601,7 @@ export class Treinador {
     if (this.equipe.length < 6) {
       this.equipe.push(novoMonstrinho);
       if (this.ativos.length < 2) this.ativos.push(novoMonstrinho);
+      console.log(`✅ ${novoMonstrinho.nome} foi adicionado à equipe de ${this.nome}!`);
     } else if (trocarPor) {
       const index = this.equipe.indexOf(trocarPor);
       if (index !== -1) {
@@ -605,10 +609,17 @@ export class Treinador {
         this.equipe[index] = novoMonstrinho;
         const indexAtivo = this.ativos.indexOf(trocarPor);
         if (indexAtivo !== -1) this.ativos[indexAtivo] = novoMonstrinho;
+        console.log(`🔄 ${novoMonstrinho.nome} entrou na equipe. ${trocarPor.nome} foi para o armazenamento.`);
       }
     } else {
       this.armazenamento.push(novoMonstrinho);
+      console.log(`📦 Equipe cheia! ${novoMonstrinho.nome} foi enviado para o armazenamento.`);
     }
+  }
+
+  public removerMonstrinho(m: Monstrinho): void {
+    this.equipe = this.equipe.filter(pkmn => pkmn !== m);
+    this.ativos = this.ativos.filter(pkmn => pkmn !== m);
   }
 
   public todosDesmaiaram(): boolean {
@@ -641,7 +652,6 @@ export class Treinador {
         evoluido.restaurarEstado(monstrinhoAtual.getVida(), monstrinhoAtual.getExperiencia());
         this.equipe[i] = evoluido;
         
-        // Transferir os ataques antigos
         monstrinhoAtual.getAtaques().forEach(atk => evoluido.aprenderAtaque(atk));
 
         const indexAtivo = this.ativos.indexOf(monstrinhoAtual);
@@ -662,8 +672,58 @@ export const PocaoAvancada = new Item("Poção Avançada", (alvo) => alvo.curar(
 export const Vitalizador = new Item("Vitalizador", (alvo, ataque) => { if (ataque) ataque.restaurarPP(); });
 export const VitalizadorSupremo = new Item("Vitalizador Supremo", (alvo) => alvo.restaurarTodosPP());
 
+export const CapturadorComum = new ItemCaptura("Capturador Comum", 1.0);
+export const CapturadorAvancado = new ItemCaptura("Capturador Avançado", 1.5);
+export const CapturadorSupremo = new ItemCaptura("Capturador Supremo", 2.0);
+
 // ==========================================
-// 8. AÇÕES
+// 8. SISTEMA DE EXPLORAÇÃO
+// ==========================================
+export class GramaAlta {
+  // Tabela de probabilidades baseada nas regras definidas
+  private chances: Record<Elemento, number> = {
+    [Elemento.LUZ]: 5,
+    [Elemento.ESCURIDAO]: 5,
+    [Elemento.MISTICO]: 5,
+    [Elemento.AGUA]: 10,
+    [Elemento.PLANTA]: 10,
+    [Elemento.FOGO]: 10,
+    [Elemento.PEDRA]: 13.75,
+    [Elemento.ELETRICO]: 13.75,
+    [Elemento.GELO]: 13.75,
+    [Elemento.VENTO]: 13.75,
+  };
+
+  // Mapeamento para instanciar o monstrinho correto
+  private pokedexBase: Record<Elemento, () => Monstrinho> = {
+    [Elemento.LUZ]: () => new Lumi(),
+    [Elemento.ESCURIDAO]: () => new Lumiel(),
+    [Elemento.MISTICO]: () => new FizzyJr(),
+    [Elemento.AGUA]: () => new Ocelly(),
+    [Elemento.PLANTA]: () => new Verdalisk(),
+    [Elemento.FOGO]: () => new Frilizard(),
+    [Elemento.PEDRA]: () => new Lithoscorp(),
+    [Elemento.ELETRICO]: () => new Amperell(),
+    [Elemento.GELO]: () => new Glaceow(),
+    [Elemento.VENTO]: () => new Zephyling(),
+  };
+
+  public explorar(): Monstrinho {
+    const random = Math.random() * 100;
+    let acumulado = 0;
+    
+    for (const elemento in this.chances) {
+      acumulado += this.chances[elemento as Elemento];
+      if (random <= acumulado) {
+        return this.pokedexBase[elemento as Elemento]();
+      }
+    }
+    return this.pokedexBase[Elemento.FOGO](); // Fallback de segurança
+  }
+}
+
+// ==========================================
+// 9. AÇÕES
 // ==========================================
 export interface Acao {
   prioridade: number;
@@ -694,8 +754,14 @@ export class AcaoItem implements Acao {
   executar(batalha: Batalha): void { this.usuario.usarItem(this.item, this.alvo, this.ataqueAlvo); }
 }
 
+export class AcaoCapturar implements Acao {
+  prioridade = 2; 
+  constructor(public usuario: Treinador, public alvo: Monstrinho, public capturador: ItemCaptura) {}
+  executar(batalha: Batalha): void { batalha.processarCaptura(this.usuario, this.alvo, this.capturador); }
+}
+
 // ==========================================
-// 9. GERENCIADOR DE REAÇÕES
+// 10. GERENCIADOR DE REAÇÕES
 // ==========================================
 export class GerenciadorDeReacoes {
   public static processarReacao(elementoAplicado: Elemento, elementoNovo: Elemento, alvo: Monstrinho, atacante: Monstrinho): boolean {
@@ -716,7 +782,7 @@ export class GerenciadorDeReacoes {
 }
 
 // ==========================================
-// 10. BATALHA
+// 11. BATALHA
 // ==========================================
 export class Batalha {
   private filaDeAcoes: Acao[] = [];
@@ -770,6 +836,51 @@ export class Batalha {
     }
   }
 
+  public processarCaptura(treinador: Treinador, alvo: Monstrinho, capturador: ItemCaptura): void {
+    // REGRA NOVA: Não é possível capturar monstrinhos de outros treinadores
+    const oponente = treinador === this.treinador1 ? this.treinador2 : this.treinador1;
+    
+    if (!oponente.isSelvagem) {
+      console.log(`❌ Você não pode capturar o monstrinho de outro treinador!`);
+      return;
+    }
+
+    const indexItem = treinador.mochila.indexOf(capturador);
+    if (indexItem === -1) {
+      console.log(`❌ ${treinador.nome} não tem ${capturador.nome} na mochila!`);
+      return;
+    }
+
+    treinador.mochila.splice(indexItem, 1);
+    console.log(`\n🔴 ${treinador.nome} jogou um ${capturador.nome} em ${alvo.nome}!`);
+    
+    let statusMultiplier = 1.0;
+    if (alvo.temEstado(Estado.DORMINDO) || alvo.temEstado(Estado.CONGELADO)) {
+      statusMultiplier = 2.0;
+    } else if (alvo.getEstados().length > 0) {
+      statusMultiplier = 1.5;
+    }
+
+    const vidaMax = alvo.getVidaMaxima();
+    const vidaAtual = alvo.getVida();
+    const taxa = alvo.getTaxaCaptura();
+    
+    const a = ((3 * vidaMax - 2 * vidaAtual) * taxa * capturador.bonus * statusMultiplier) / (3 * vidaMax);
+    const roll = Math.floor(Math.random() * 256);
+
+    console.log(`   -> Cálculo base (a): ${Math.floor(a)} / 255. Sorteado: ${roll}`);
+
+    if (roll <= a) {
+      console.log(`✨ CLICK! ${alvo.nome} foi capturado com sucesso!`);
+      
+      oponente.removerMonstrinho(alvo);
+      treinador.capturarMonstrinho(alvo);
+      this.verificarFimDeJogo();
+    } else {
+      console.log(`❌ Ah não! ${alvo.nome} escapou da captura!`);
+    }
+  }
+
   private calcularDano(atacante: Monstrinho, defensor: Monstrinho, ataque: Ataque): number {
     let danoBase = ((((2 * atacante.getNivel() / 5) + 2) * ataque.getPoderBase() * atacante.getAtaque()) / defensor.getDefesa()) / 50 + 2;
     if (ataque.getElemento() === atacante.getElementoInerente()) danoBase *= 1.5; 
@@ -799,7 +910,7 @@ export class Batalha {
   }
 
   private verificarFimDeJogo(): void {
-    if (this.treinador1.todosDesmaiaram() || this.treinador2.todosDesmaiaram()) {
+    if (this.treinador1.todosDesmaiaram() || this.treinador2.todosDesmaiaram() || this.treinador1.equipe.length === 0 || this.treinador2.equipe.length === 0) {
       this.estado = StatusBatalha.FINALIZADA;
       console.log("\n🏁 === A BATALHA TERMINOU! === 🏁");
       const resetarEquipe = (treinador: Treinador) => {
