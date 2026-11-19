@@ -14,13 +14,15 @@ export enum Estado {
 }
 
 export enum StatusBatalha {
-  EM_ANDAMENTO = "Em Andamento", FINALIZADA = "Finalizada"
+  EM_ANDAMENTO = "Em Andamento",
+  FINALIZADA = "Finalizada"
 }
 
 // ==========================================
 // 2. TABELAS DE REGRAS
 // ==========================================
 
+// Tabela 1: Efetividade de Dano (Atacante -> Defensor)
 export const TabelaEfetividade: Record<Elemento, Record<Elemento, number>> = {
   [Elemento.FOGO]: { [Elemento.AGUA]: 0.5, [Elemento.PLANTA]: 2, [Elemento.PEDRA]: 0.5 } as any,
   [Elemento.AGUA]: { [Elemento.FOGO]: 2, [Elemento.PLANTA]: 0.5, [Elemento.PEDRA]: 2, [Elemento.ELETRICO]: 0.5 } as any,
@@ -34,6 +36,7 @@ export const TabelaEfetividade: Record<Elemento, Record<Elemento, number>> = {
   [Elemento.ESCURIDAO]: { [Elemento.LUZ]: 2, [Elemento.MISTICO]: 0.5 } as any,
 };
 
+// Tabela 2: Reações (Chave: "ElementoAplicado_ElementoNovo")
 export const TabelaReacoes: Record<string, string> = {
   [`${Elemento.FOGO}_${Elemento.AGUA}`]: "Vaporizacao",
   [`${Elemento.AGUA}_${Elemento.FOGO}`]: "Vaporizacao",
@@ -247,7 +250,7 @@ export abstract class Monstrinho {
 }
 
 // ==========================================
-// 5. POKEDEX
+// 5. POKEDEX COMPLETA
 // ==========================================
 
 // --- FOGO ---
@@ -581,13 +584,15 @@ export class Shadenight extends Monstrinho {
 }
 
 // ==========================================
-// 6. TREINADOR
+// 6. TREINADOR E NPCs
 // ==========================================
 export class Treinador {
   public ativos: Monstrinho[] = [];
   public mochila: Item[] = [];
   public armazenamento: Monstrinho[] = [];
   public isSelvagem: boolean = false;
+  public dinheiro: number = 0;
+  public sexo: string = "Não definido";
 
   constructor(public readonly nome: string, public equipe: Monstrinho[] = []) {
     this.atualizarAtivosIniciais();
@@ -597,17 +602,14 @@ export class Treinador {
     this.ativos = this.equipe.filter(m => m.getVida() > 0).slice(0, 2);
   }
 
-  // NOVO MÉTODO: Reorganizar a ordem dos monstrinhos na equipe
   public reorganizarEquipe(indexOrigem: number, indexDestino: number): boolean {
     if (indexOrigem < 0 || indexOrigem >= this.equipe.length || 
         indexDestino < 0 || indexDestino >= this.equipe.length) {
       return false;
     }
-
     const monstrinho = this.equipe[indexOrigem];
     this.equipe.splice(indexOrigem, 1);
     this.equipe.splice(indexDestino, 0, monstrinho);
-
     this.atualizarAtivosIniciais();
     return true;
   }
@@ -616,7 +618,6 @@ export class Treinador {
     if (this.equipe.length < 6) {
       this.equipe.push(novoMonstrinho);
       if (this.ativos.length < 2) this.ativos.push(novoMonstrinho);
-      console.log(`✅ ${novoMonstrinho.nome} foi adicionado à equipe de ${this.nome}!`);
     } else if (trocarPor) {
       const index = this.equipe.indexOf(trocarPor);
       if (index !== -1) {
@@ -624,11 +625,9 @@ export class Treinador {
         this.equipe[index] = novoMonstrinho;
         const indexAtivo = this.ativos.indexOf(trocarPor);
         if (indexAtivo !== -1) this.ativos[indexAtivo] = novoMonstrinho;
-        console.log(`🔄 ${novoMonstrinho.nome} entrou na equipe. ${trocarPor.nome} foi para o armazenamento.`);
       }
     } else {
       this.armazenamento.push(novoMonstrinho);
-      console.log(`📦 Equipe cheia! ${novoMonstrinho.nome} foi enviado para o armazenamento.`);
     }
   }
 
@@ -658,6 +657,13 @@ export class Treinador {
     return true;
   }
 
+  public gastarDinheiro(valor: number): boolean {
+    if (this.dinheiro >= valor) { this.dinheiro -= valor; return true; }
+    return false;
+  }
+
+  public adicionarDinheiro(valor: number): void { this.dinheiro += valor; }
+
   public verificarEvolucoes(): void {
     for (let i = 0; i < this.equipe.length; i++) {
       const monstrinhoAtual = this.equipe[i];
@@ -666,77 +672,103 @@ export class Treinador {
       if (evoluido) {
         evoluido.restaurarEstado(monstrinhoAtual.getVida(), monstrinhoAtual.getExperiencia());
         this.equipe[i] = evoluido;
-        
         monstrinhoAtual.getAtaques().forEach(atk => evoluido.aprenderAtaque(atk));
-
         const indexAtivo = this.ativos.indexOf(monstrinhoAtual);
         if (indexAtivo !== -1) this.ativos[indexAtivo] = evoluido;
-
         console.log(`\n🌟 UAU! ${monstrinhoAtual.nome} evoluiu para ${evoluido.nome}!\n`);
       }
     }
   }
 }
 
+export interface DadosNPC {
+  id: string;
+  nome: string;
+  equipe: Monstrinho[];
+  dinheiroPremio: number;
+  textoVitoria: string;
+}
+
+export function criarNPCs(): DadosNPC[] {
+  return [
+      {
+          id: "npc_jovem",
+          nome: "Jovem Gary",
+          equipe: [ new Ocelly(3), new Frilizard(3) ],
+          dinheiroPremio: 50,
+          textoVitoria: "Ei, você! Meu monstrinho é muito mais forte que o seu!"
+      },
+      {
+          id: "npc_rival",
+          nome: "Rival Blue",
+          equipe: [ new Verdalisk(5), new Frilizard(5) ],
+          dinheiroPremio: 150,
+          textoVitoria: "Eu sou o próximo campeão! Prepare-se!"
+      }
+  ];
+}
+
 // ==========================================
-// 7. ITENS
+// 7. ITENS E EXPLORAÇÃO
 // ==========================================
 export const PocaoInicial = new Item("Poção Inicial", (alvo) => alvo.curar(10));
 export const PocaoIntermediaria = new Item("Poção Intermediária", (alvo) => alvo.curar(20));
 export const PocaoAvancada = new Item("Poção Avançada", (alvo) => alvo.curar(40));
 export const Vitalizador = new Item("Vitalizador", (alvo, ataque) => { if (ataque) ataque.restaurarPP(); });
 export const VitalizadorSupremo = new Item("Vitalizador Supremo", (alvo) => alvo.restaurarTodosPP());
-
 export const CapturadorComum = new ItemCaptura("Capturador Comum", 1.0);
 export const CapturadorAvancado = new ItemCaptura("Capturador Avançado", 1.5);
 export const CapturadorSupremo = new ItemCaptura("Capturador Supremo", 2.0);
 
-// ==========================================
-// 8. SISTEMA DE EXPLORAÇÃO
-// ==========================================
 export class GramaAlta {
   private chances: Record<Elemento, number> = {
-    [Elemento.LUZ]: 5,
-    [Elemento.ESCURIDAO]: 5,
-    [Elemento.MISTICO]: 5,
-    [Elemento.AGUA]: 10,
-    [Elemento.PLANTA]: 10,
-    [Elemento.FOGO]: 10,
-    [Elemento.PEDRA]: 13.75,
-    [Elemento.ELETRICO]: 13.75,
-    [Elemento.GELO]: 13.75,
-    [Elemento.VENTO]: 13.75,
+    [Elemento.LUZ]: 5, [Elemento.ESCURIDAO]: 5, [Elemento.MISTICO]: 5,
+    [Elemento.AGUA]: 10, [Elemento.PLANTA]: 10, [Elemento.FOGO]: 10,
+    [Elemento.PEDRA]: 13.75, [Elemento.ELETRICO]: 13.75, [Elemento.GELO]: 13.75, [Elemento.VENTO]: 13.75,
   };
 
   private pokedexBase: Record<Elemento, () => Monstrinho> = {
-    [Elemento.LUZ]: () => new Lumi(),
-    [Elemento.ESCURIDAO]: () => new Lumiel(),
-    [Elemento.MISTICO]: () => new FizzyJr(),
-    [Elemento.AGUA]: () => new Ocelly(),
-    [Elemento.PLANTA]: () => new Verdalisk(),
-    [Elemento.FOGO]: () => new Frilizard(),
-    [Elemento.PEDRA]: () => new Lithoscorp(),
-    [Elemento.ELETRICO]: () => new Amperell(),
-    [Elemento.GELO]: () => new Glaceow(),
-    [Elemento.VENTO]: () => new Zephyling(),
+    [Elemento.LUZ]: () => new Lumi(), [Elemento.ESCURIDAO]: () => new Lumiel(),
+    [Elemento.MISTICO]: () => new FizzyJr(), [Elemento.AGUA]: () => new Ocelly(),
+    [Elemento.PLANTA]: () => new Verdalisk(), [Elemento.FOGO]: () => new Frilizard(),
+    [Elemento.PEDRA]: () => new Lithoscorp(), [Elemento.ELETRICO]: () => new Amperell(),
+    [Elemento.GELO]: () => new Glaceow(), [Elemento.VENTO]: () => new Zephyling(),
   };
 
   public explorar(): Monstrinho {
     const random = Math.random() * 100;
     let acumulado = 0;
-    
     for (const elemento in this.chances) {
       acumulado += this.chances[elemento as Elemento];
-      if (random <= acumulado) {
-        return this.pokedexBase[elemento as Elemento]();
-      }
+      if (random <= acumulado) return this.pokedexBase[elemento as Elemento]();
     }
     return this.pokedexBase[Elemento.FOGO]();
   }
 }
 
 // ==========================================
-// 9. AÇÕES
+// 8. GERENCIADOR DE REAÇÕES (RESTAURADO)
+// ==========================================
+export class GerenciadorDeReacoes {
+  public static processarReacao(elementoAplicado: Elemento, elementoNovo: Elemento, alvo: Monstrinho, atacante: Monstrinho): boolean {
+    const chave = `${elementoAplicado}_${elementoNovo}`;
+    const nomeReacao = TabelaReacoes[chave];
+    if (!nomeReacao) return false;
+
+    console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: ${nomeReacao}!`);
+    switch (nomeReacao) {
+      case "Vaporizacao": alvo.aplicarModificador('defesa', 0.8); break;
+      case "Queimadura": alvo.adicionarEstado(Estado.QUEIMADO); break;
+      case "Dissipa": break;
+      case "Lama": alvo.adicionarEstado(Estado.LAMA); break;
+      default: console.log(`   -> Efeito de ${nomeReacao} ainda não implementado.`);
+    }
+    return true;
+  }
+}
+
+// ==========================================
+// 9. AÇÕES E BATALHA (RESTAURADO 2x2 E STATUS)
 // ==========================================
 export interface Acao {
   prioridade: number;
@@ -746,7 +778,7 @@ export interface Acao {
 
 export class AcaoAtacar implements Acao {
   prioridade = 1;
-  constructor(public usuario: Monstrinho, public alvo: Monstrinho | Monstrinho[], public ataque: Ataque) {}
+  constructor(public usuario: Monstrinho, public alvo: Monstrinho, public ataque: Ataque) {}
   executar(batalha: Batalha): void {
     if (this.usuario.temEstado(Estado.DORMINDO) || this.usuario.temEstado(Estado.CONGELADO)) return;
     if (!this.ataque.temPP()) return;
@@ -773,158 +805,135 @@ export class AcaoCapturar implements Acao {
   executar(batalha: Batalha): void { batalha.processarCaptura(this.usuario, this.alvo, this.capturador); }
 }
 
-// ==========================================
-// 10. GERENCIADOR DE REAÇÕES
-// ==========================================
-export class GerenciadorDeReacoes {
-  public static processarReacao(elementoAplicado: Elemento, elementoNovo: Elemento, alvo: Monstrinho, atacante: Monstrinho): boolean {
-    const chave = `${elementoAplicado}_${elementoNovo}`;
-    const nomeReacao = TabelaReacoes[chave];
-    if (!nomeReacao) return false;
 
-    console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: ${nomeReacao}!`);
-    switch (nomeReacao) {
-      case "Vaporizacao": alvo.aplicarModificador('defesa', 0.8); break;
-      case "Queimadura": alvo.adicionarEstado(Estado.QUEIMADO); break;
-      case "Dissipa": break;
-      case "Lama": alvo.adicionarEstado(Estado.LAMA); break;
-      default: console.log(`   -> Efeito de ${nomeReacao} ainda não implementado.`);
-    }
-    return true;
-  }
-}
-
-// ==========================================
-// 11. BATALHA
-// ==========================================
 export class Batalha {
-  private filaDeAcoes: Acao[] = [];
   private estado: StatusBatalha = StatusBatalha.EM_ANDAMENTO;
+  private filaDeAcoes: Acao[] = [];
 
   constructor(public treinador1: Treinador, public treinador2: Treinador) {}
 
   public registrarAcao(acao: Acao): void { this.filaDeAcoes.push(acao); }
 
-  public resolverTurno(): void {
-    if ((this.estado as StatusBatalha) === StatusBatalha.FINALIZADA) return;
-
-    this.filaDeAcoes.sort((a, b) => {
-      if (a.prioridade !== b.prioridade) return b.prioridade - a.prioridade;
-      const velA = a.usuario instanceof Monstrinho ? a.usuario.getVelocidade() : 999;
-      const velB = b.usuario instanceof Monstrinho ? b.usuario.getVelocidade() : 999;
-      return velB - velA;
-    });
-
-    for (const acao of this.filaDeAcoes) {
-      if ((this.estado as StatusBatalha) === StatusBatalha.FINALIZADA) break;
-      acao.executar(this);
-      this.verificarFimDeJogo();
+  public processarAtaque(atacante: Monstrinho, defensor: Monstrinho, ataque: Ataque): string {
+    if (defensor.getVida() <= 0) return "";
+    if (!ataque.temPP()) return `${atacante.nome} está sem PP!`;
+    
+    // Precisão
+    if (Math.random() * 100 > ataque.getPrecisao()) {
+      return `❌ ${atacante.nome} errou o ataque ${ataque.getNome()} em ${defensor.nome}!`;
     }
 
-    this.processarEfeitosFimDeTurno();
-    this.filaDeAcoes = [];
-  }
-
-  public processarAtaque(atacante: Monstrinho, alvo: Monstrinho | Monstrinho[], ataque: Ataque): void {
-    const alvos = Array.isArray(alvo) ? alvo : [alvo];
-
-    for (const defensor of alvos) {
-      if (defensor.getVida() <= 0) continue;
-      if (Math.random() * 100 > ataque.getPrecisao()) continue;
-
-      const dano = this.calcularDano(atacante, defensor, ataque);
-      defensor.receberDano(dano);
-      console.log(`⚔️  ${atacante.nome} causou ${dano} de dano em ${defensor.nome} com ${ataque.getNome()}!`);
-
-      const elementoNovo = atacante.getElementoInerente();
-      const combinacao = defensor.aplicarElemento(elementoNovo);
-      
-      if (combinacao) {
-        const teveReacao = GerenciadorDeReacoes.processarReacao(combinacao[0], combinacao[1], defensor, atacante);
-        if (!teveReacao) {
-          defensor.aplicarElemento(elementoNovo);
-          console.log(`   -> Nenhuma reação. O elemento ${elementoNovo} substituiu o elemento anterior.`);
-        }
+    // Cálculo de dano
+    let danoBase = ((((2 * atacante.getNivel() / 5) + 2) * ataque.getPoderBase() * atacante.getAtaque()) / defensor.getDefesa()) / 50 + 2;
+    if (ataque.getElemento() === atacante.getElementoInerente()) danoBase *= 1.5; 
+    danoBase *= TabelaEfetividade[ataque.getElemento()]?.[defensor.getElementoInerente()] ?? 1;
+    
+    let msgCritico = "";
+    if (Math.random() < 0.1) { danoBase *= 1.5; msgCritico = " (Crítico!)"; }
+    const dano = Math.floor(danoBase * (Math.random() * 0.15 + 0.85));
+    
+    defensor.receberDano(dano);
+    
+    // Lógica de Elementos e Reações
+    const elementoNovo = atacante.getElementoInerente();
+    const combinacao = defensor.aplicarElemento(elementoNovo);
+    let msgReacao = "";
+    
+    if (combinacao) {
+      const teveReacao = GerenciadorDeReacoes.processarReacao(combinacao[0], combinacao[1], defensor, atacante);
+      if (!teveReacao) {
+        defensor.aplicarElemento(elementoNovo); // Substitui o antigo
+        msgReacao = ` (Elemento ${elementoNovo} substituiu o anterior)`;
+      } else {
+        msgReacao = ` (Reação: ${TabelaReacoes[`${combinacao[0]}_${combinacao[1]}`]})`;
       }
     }
+
+    this.verificarFimDeJogo();
+    
+    return `⚔️ ${atacante.nome} causou ${dano} de dano em ${defensor.nome} com ${ataque.getNome()}!${msgCritico}${msgReacao}`;
   }
 
-  public processarCaptura(treinador: Treinador, alvo: Monstrinho, capturador: ItemCaptura): void {
+  public executarTurnoCompleto(acoesJogador: AcaoAtacar[], acoesInimigo: AcaoAtacar[]): string[] {
+    const logs: string[] = [];
+    
+    // Junta as ações de ataque (Ações de troca/item devem ser feitas fora deste método ou no início do turno)
+    const todasAcoes = [...acoesJogador, ...acoesInimigo].sort((a, b) => {
+      return b.usuario.getVelocidade() - a.usuario.getVelocidade();
+    });
+
+    for (const acao of todasAcoes) {
+      if (acao.usuario.getVida() > 0 && acao.alvo.getVida() > 0) {
+        const log = this.processarAtaque(acao.usuario, acao.alvo, acao.ataque);
+        if (log !== "") logs.push(log);
+      }
+    }
+
+    // Processa Queimadura/Sangramento
+    const logsStatus = this.processarEfeitosFimDeTurno();
+    logs.push(...logsStatus);
+
+    this.verificarFimDeJogo();
+    return logs;
+  }
+
+  public processarCaptura(treinador: Treinador, alvo: Monstrinho, capturador: ItemCaptura): string {
     const oponente = treinador === this.treinador1 ? this.treinador2 : this.treinador1;
+    if (!oponente.isSelvagem) return "Você não pode capturar o monstrinho de outro treinador!";
     
-    if (!oponente.isSelvagem) {
-      console.log(`❌ Você não pode capturar o monstrinho de outro treinador!`);
-      return;
-    }
-
     const indexItem = treinador.mochila.indexOf(capturador);
-    if (indexItem === -1) {
-      console.log(`❌ ${treinador.nome} não tem ${capturador.nome} na mochila!`);
-      return;
-    }
+    if (indexItem !== -1) treinador.mochila.splice(indexItem, 1); // Consome o item
 
-    treinador.mochila.splice(indexItem, 1);
-    console.log(`\n🔴 ${treinador.nome} jogou um ${capturador.nome} em ${alvo.nome}!`);
-    
     let statusMultiplier = 1.0;
-    if (alvo.temEstado(Estado.DORMINDO) || alvo.temEstado(Estado.CONGELADO)) {
-      statusMultiplier = 2.0;
-    } else if (alvo.getEstados().length > 0) {
-      statusMultiplier = 1.5;
-    }
+    if (alvo.temEstado(Estado.DORMINDO) || alvo.temEstado(Estado.CONGELADO)) statusMultiplier = 2.0;
+    else if (alvo.getEstados().length > 0) statusMultiplier = 1.5;
 
-    const vidaMax = alvo.getVidaMaxima();
-    const vidaAtual = alvo.getVida();
-    const taxa = alvo.getTaxaCaptura();
+    const vidaMax = alvo.getVidaMaxima(); const vidaAtual = alvo.getVida(); const taxa = alvo.getTaxaCaptura();
     
     const a = ((3 * vidaMax - 2 * vidaAtual) * taxa * capturador.bonus * statusMultiplier) / (3 * vidaMax);
     const roll = Math.floor(Math.random() * 256);
 
-    console.log(`   -> Cálculo base (a): ${Math.floor(a)} / 255. Sorteado: ${roll}`);
-
     if (roll <= a) {
-      console.log(`✨ CLICK! ${alvo.nome} foi capturado com sucesso!`);
-      
-      oponente.removerMonstrinho(alvo);
+      oponente.equipe = oponente.equipe.filter(m => m !== alvo);
+      oponente.ativos = oponente.ativos.filter(m => m !== alvo);
       treinador.capturarMonstrinho(alvo);
       this.verificarFimDeJogo();
+      return `✨ CLICK! ${alvo.nome} foi capturado com sucesso!`;
     } else {
-      console.log(`❌ Ah não! ${alvo.nome} escapou da captura!`);
+      return `❌ Ah não! ${alvo.nome} escapou da captura!`;
     }
   }
 
-  private calcularDano(atacante: Monstrinho, defensor: Monstrinho, ataque: Ataque): number {
-    let danoBase = ((((2 * atacante.getNivel() / 5) + 2) * ataque.getPoderBase() * atacante.getAtaque()) / defensor.getDefesa()) / 50 + 2;
-    if (ataque.getElemento() === atacante.getElementoInerente()) danoBase *= 1.5; 
-    danoBase *= TabelaEfetividade[ataque.getElemento()]?.[defensor.getElementoInerente()] ?? 1;
-    if (Math.random() < 0.1) { danoBase *= 1.5; console.log("🔥 Crítico!"); }
-    return Math.floor(danoBase * (Math.random() * 0.15 + 0.85));
-  }
-
-  private processarEfeitosFimDeTurno(): void {
+  public processarEfeitosFimDeTurno(): string[] {
+    const logs: string[] = [];
     const processarStatus = (treinador: Treinador) => {
       treinador.equipe.forEach(m => {
         if (m.getVida() <= 0) return;
+        
         if (m.temEstado(Estado.QUEIMADO)) {
           const dano = Math.floor(m.getVidaMaxima() * 0.05);
           m.receberDano(dano);
-          console.log(`🔥 ${m.nome} sofreu ${dano} de dano por Queimadura.`);
+          logs.push(`🔥 ${m.nome} sofreu ${dano} de dano por Queimadura.`);
         }
         if (m.temEstado(Estado.SANGRANDO)) {
           const dano = Math.floor(m.getVidaMaxima() * 0.05);
           m.receberDano(dano);
-          console.log(`🩸 ${m.nome} sofreu ${dano} de dano por Sangramento.`);
+          logs.push(`🩸 ${m.nome} sofreu ${dano} de dano por Sangramento.`);
         }
       });
     };
     processarStatus(this.treinador1);
     processarStatus(this.treinador2);
+    this.verificarFimDeJogo();
+    return logs;
   }
+
+  public getEstado(): StatusBatalha { return this.estado; }
 
   private verificarFimDeJogo(): void {
     if (this.treinador1.todosDesmaiaram() || this.treinador2.todosDesmaiaram() || this.treinador1.equipe.length === 0 || this.treinador2.equipe.length === 0) {
       this.estado = StatusBatalha.FINALIZADA;
-      console.log("\n🏁 === A BATALHA TERMINOU! === 🏁");
+      // Limpa os status ao final
       const resetarEquipe = (treinador: Treinador) => {
         treinador.equipe.forEach(m => m.resetarAposBatalha());
         treinador.ativos.forEach(m => m.resetarAposBatalha());
