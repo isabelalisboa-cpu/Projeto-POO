@@ -18,6 +18,12 @@ export enum StatusBatalha {
   FINALIZADA = "Finalizada"
 }
 
+export enum Dificuldade {
+  FACIL = "Fácil",
+  MEDIO = "Médio",
+  DIFICIL = "Difícil"
+}
+
 // ==========================================
 // 2. TABELAS DE REGRAS
 // ==========================================
@@ -184,6 +190,17 @@ export abstract class Monstrinho {
       console.log(`❌ ${this.nome} decidiu não aprender ${this.ataquePendente.getNome()}.`);
       this.ataquePendente = null;
     }
+  }
+
+  /** Equipa os (até) 4 melhores ataques que o monstrinho já teria aprendido no nível atual. Útil para NPCs. */
+  public equiparMelhoresAtaques(): void {
+    const niveis = Object.keys(this.tabelaDeAprendizado)
+      .map(Number)
+      .filter(n => n <= this.nivel)
+      .sort((a, b) => b - a)
+      .slice(0, 4)
+      .sort((a, b) => a - b);
+    this.ataques = niveis.map(n => this.tabelaDeAprendizado[n]);
   }
 
   public restaurarTodosPP(): void {
@@ -588,20 +605,48 @@ export class Shadenight extends Monstrinho {
 // ==========================================
 // 6. TREINADOR E NPCs
 // ==========================================
+export const MAX_EQUIPE = 6; // máximo de monstrinhos que um treinador leva em batalha
+
 export class Treinador {
   public ativos: Monstrinho[] = [];
+  public substituicaoAutomatica: boolean = false; // true para NPCs/selvagens: reserva entra sozinho quando o ativo desmaia
   public mochila: Item[] = [];
   public armazenamento: Monstrinho[] = [];
   public isSelvagem: boolean = false;
   public dinheiro: number = 0;
   public sexo: string = "Não definido";
+  private limiteAtivos: number = 2; // 1 em batalha selvagem, 2 contra treinadores
 
   constructor(public readonly nome: string, public equipe: Monstrinho[] = []) {
+    this.equipe = this.equipe.slice(0, MAX_EQUIPE);
     this.atualizarAtivosIniciais();
   }
 
   private atualizarAtivosIniciais(): void {
-    this.ativos = this.equipe.filter(m => m.getVida() > 0).slice(0, 2);
+    this.ativos = this.equipe.filter(m => m.getVida() > 0).slice(0, this.limiteAtivos);
+  }
+
+  /** Define quantos monstrinhos lutam ao mesmo tempo (1 ou 2) e refaz a lista de ativos. */
+  public definirLimiteAtivos(limite: number): void {
+    this.limiteAtivos = limite;
+    this.atualizarAtivosIniciais();
+  }
+
+  /**
+   * Tira os desmaiados do campo e coloca reservas vivos no lugar (até o limite de ativos).
+   * Retorna os monstrinhos que acabaram de entrar em campo.
+   */
+  public reporAtivosDesmaiados(): Monstrinho[] {
+    this.ativos = this.ativos.filter(m => m.getVida() > 0);
+    const entraram: Monstrinho[] = [];
+    for (const m of this.equipe) {
+      if (this.ativos.length >= this.limiteAtivos) break;
+      if (m.getVida() > 0 && !this.ativos.includes(m)) {
+        this.ativos.push(m);
+        entraram.push(m);
+      }
+    }
+    return entraram;
   }
 
   public reorganizarEquipe(indexOrigem: number, indexDestino: number): boolean {
@@ -617,9 +662,9 @@ export class Treinador {
   }
 
   public capturarMonstrinho(novoMonstrinho: Monstrinho, trocarPor?: Monstrinho): void {
-    if (this.equipe.length < 6) {
+    if (this.equipe.length < MAX_EQUIPE) {
       this.equipe.push(novoMonstrinho);
-      if (this.ativos.length < 2) this.ativos.push(novoMonstrinho);
+      if (this.ativos.length < this.limiteAtivos) this.ativos.push(novoMonstrinho);
     } else if (trocarPor) {
       const index = this.equipe.indexOf(trocarPor);
       if (index !== -1) {
@@ -640,6 +685,16 @@ export class Treinador {
 
   public todosDesmaiaram(): boolean {
     return this.equipe.every(m => m.getVida() <= 0);
+  }
+
+  /** Cura total da equipe (vida, PP, estados) e reorganiza os ativos. Usado pelo Hospital. */
+  public curarEquipeCompleta(): void {
+    this.equipe.forEach(m => {
+      m.curar(m.getVidaMaxima());
+      m.restaurarTodosPP();
+      m.resetarAposBatalha(); // limpa estados, elementos e modificadores
+    });
+    this.atualizarAtivosIniciais();
   }
 
   public trocarMonstrinho(antigo: Monstrinho, novo: Monstrinho): boolean {
@@ -686,28 +741,128 @@ export class Treinador {
 export interface DadosNPC {
   id: string;
   nome: string;
+  sexo?: string;
+  dificuldade: Dificuldade;
   equipe: Monstrinho[];
   dinheiroPremio: number;
   textoVitoria: string;
 }
 
+/** Garante que o monstrinho do NPC use os melhores ataques disponíveis para o nível dele. */
+function preparar<T extends Monstrinho>(m: T): T {
+  m.equiparMelhoresAtaques();
+  return m;
+}
+
+/**
+ * 13 NPCs (batalhas contra treinadores são sempre 2 contra 2 em campo):
+ *  - 8 Fáceis   (2 monstrinhos, níveis 3 a 6)
+ *  - 4 Médios   (4 monstrinhos, níveis 20 a 22)
+ *  - 1 Difícil  (6 monstrinhos, todos nível 30) - a mãe do protagonista
+ */
 export function criarNPCs(): DadosNPC[] {
   return [
-      {
-          id: "npc_jovem",
-          nome: "Jovem Gary",
-          equipe: [ new Ocelly(3), new Frilizard(3) ],
-          dinheiroPremio: 50,
-          textoVitoria: "Ei, você! Meu monstrinho é muito mais forte que o seu!"
-      },
-      {
-          id: "npc_rival",
-          nome: "Rival Blue",
-          equipe: [ new Verdalisk(5), new Frilizard(5) ],
-          dinheiroPremio: 150,
-          textoVitoria: "Eu sou o próximo campeão! Prepare-se!"
-      }
+    // ---------------- FÁCEIS (8) ----------------
+    {
+      id: "npc_jovem", nome: "Jovem Gary", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Ocelly(3)), preparar(new Frilizard(3)) ],
+      dinheiroPremio: 50,
+      textoVitoria: "Ei, você! Meu monstrinho é muito mais forte que o seu!"
+    },
+    {
+      id: "npc_lia", nome: "Criança Lia", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Zephyling(3)), preparar(new Lumi(4)) ],
+      dinheiroPremio: 30,
+      textoVitoria: "Vamos brincar de batalha? Eu vou ganhar!"
+    },
+    {
+      id: "npc_tiao", nome: "Pescador Tião", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Ocelly(4)), preparar(new Glaceow(4)) ],
+      dinheiroPremio: 40,
+      textoVitoria: "Hoje o peixe não mordeu, mas a batalha vai ser boa!"
+    },
+    {
+      id: "npc_duda", nome: "Campista Duda", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Verdalisk(4)), preparar(new Lithoscorp(5)) ],
+      dinheiroPremio: 45,
+      textoVitoria: "Acampar com monstrinhos é o melhor! Mostra o que você tem!"
+    },
+    {
+      id: "npc_caio", nome: "Mochileiro Caio", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Amperell(5)), preparar(new Zephyling(5)) ],
+      dinheiroPremio: 55,
+      textoVitoria: "Rodei o mundo todo e agora quero te desafiar!"
+    },
+    {
+      id: "npc_bia", nome: "Estudante Bia", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Lumi(5)), preparar(new FizzyJr(5)) ],
+      dinheiroPremio: 60,
+      textoVitoria: "Estudei os elementos a semana inteira. Vai ser fácil!"
+    },
+    {
+      id: "npc_davi", nome: "Menino Davi", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new Frilizard(6)), preparar(new Glaceow(6)) ],
+      dinheiroPremio: 70,
+      textoVitoria: "Fogo e gelo! Ninguém consegue me vencer!"
+    },
+    {
+      id: "npc_nina", nome: "Garota Nina", dificuldade: Dificuldade.FACIL,
+      equipe: [ preparar(new FizzyJr(6)), preparar(new Lumiel(6)) ],
+      dinheiroPremio: 80,
+      textoVitoria: "Luz, sombra e magia... prepare-se!"
+    },
+
+    // ---------------- MÉDIOS (4) ----------------
+    {
+      id: "npc_marina", nome: "Nadadora Marina", dificuldade: Dificuldade.MEDIO,
+      equipe: [ preparar(new Jellerinna(22)), preparar(new Glacielle(21)), preparar(new Katanlisk(20)), preparar(new Hurrihawk(20)) ],
+      dinheiroPremio: 250,
+      textoVitoria: "As águas são minhas! Vai afundar ou nadar?"
+    },
+    {
+      id: "npc_rogerio", nome: "Montanhista Rogério", dificuldade: Dificuldade.MEDIO,
+      equipe: [ preparar(new Rockpion(22)), preparar(new Electrusa(21)), preparar(new Flareperor(20)), preparar(new Katanlisk(20)) ],
+      dinheiroPremio: 280,
+      textoVitoria: "Escalei montanhas maiores do que você!"
+    },
+    {
+      id: "npc_kaito", nome: "Ninja Kaito", dificuldade: Dificuldade.MEDIO,
+      equipe: [ preparar(new Hurrihawk(22)), preparar(new Shadenight(21)), preparar(new Electrusa(20)), preparar(new Glacielle(20)) ],
+      dinheiroPremio: 320,
+      textoVitoria: "Você não vai nem me ver chegando..."
+    },
+    {
+      id: "npc_selene", nome: "Mística Selene", dificuldade: Dificuldade.MEDIO,
+      equipe: [ preparar(new Fizzarolly(22)), preparar(new Celestina(21)), preparar(new Shadenight(20)), preparar(new Flareperor(20)) ],
+      dinheiroPremio: 350,
+      textoVitoria: "As estrelas previram esta batalha. Elas também previram o resultado."
+    },
+
+    // ---------------- DIFÍCIL (1) ----------------
+    {
+      id: "npc_mae", nome: "Mamãe", sexo: "Feminino", dificuldade: Dificuldade.DIFICIL,
+      equipe: [
+        preparar(new Flareperor(30)), preparar(new Jellerinna(30)), preparar(new Katanlisk(30)),
+        preparar(new Electrusa(30)), preparar(new Celestina(30)), preparar(new Shadenight(30))
+      ],
+      dinheiroPremio: 1000,
+      textoVitoria: "Você cresceu tanto, meu bem... mas a mamãe ainda tem muito a te ensinar. Venha!"
+    }
   ];
+}
+
+/** Atalho: lista só os NPCs de uma dificuldade. */
+export function npcsPorDificuldade(dificuldade: Dificuldade): DadosNPC[] {
+  return criarNPCs().filter(n => n.dificuldade === dificuldade);
+}
+
+/** Converte os dados de um NPC em um Treinador pronto para batalhar (reservas entram sozinhas). */
+export function criarTreinadorNPC(dados: DadosNPC): Treinador {
+  const t = new Treinador(dados.nome, dados.equipe);
+  if (dados.sexo) t.sexo = dados.sexo;
+  t.dinheiro = dados.dinheiroPremio;
+  t.substituicaoAutomatica = true;
+  return t;
 }
 
 // ==========================================
@@ -745,6 +900,61 @@ export class GramaAlta {
       if (random <= acumulado) return this.pokedexBase[elemento as Elemento]();
     }
     return this.pokedexBase[Elemento.FOGO]();
+  }
+
+  /** Encontro no matinho: cria o treinador selvagem e inicia uma batalha 1 contra 1. */
+  public iniciarBatalha(jogador: Treinador): Batalha {
+    const selvagem = new Treinador("Selvagem", [this.explorar()]);
+    selvagem.isSelvagem = true;
+    return new Batalha(jogador, selvagem);
+  }
+}
+
+// ==========================================
+// 7.5 HOSPITAL E LOJA
+// ==========================================
+export class Hospital {
+  /** Cura toda a equipe de graça: vida, PP, estados (inclusive desmaiados). */
+  public curar(treinador: Treinador): string {
+    if (treinador.equipe.length === 0) return "🏥 Você não tem monstrinhos para curar.";
+    treinador.curarEquipeCompleta();
+    return "🏥 Sua equipe foi totalmente curada. Esperamos você de volta!";
+  }
+}
+
+export interface ItemLoja {
+  item: Item;
+  preco: number;
+}
+
+export class Loja {
+  // Preços ajustáveis
+  public readonly catalogo: ItemLoja[] = [
+    { item: PocaoInicial, preco: 20 },
+    { item: PocaoIntermediaria, preco: 50 },
+    { item: PocaoAvancada, preco: 120 },
+    { item: Vitalizador, preco: 40 },
+    { item: VitalizadorSupremo, preco: 150 },
+    { item: CapturadorComum, preco: 30 },
+    { item: CapturadorAvancado, preco: 80 },
+    { item: CapturadorSupremo, preco: 200 },
+  ];
+
+  public listar(): string[] {
+    return this.catalogo.map(i => `${i.item.nome} - $${i.preco}`);
+  }
+
+  public comprar(treinador: Treinador, item: Item, quantidade: number = 1): string {
+    const entrada = this.catalogo.find(i => i.item === item);
+    if (!entrada) return "❌ Esse item não é vendido aqui.";
+    if (quantidade < 1) return "❌ Quantidade inválida.";
+
+    const total = entrada.preco * quantidade;
+    if (!treinador.gastarDinheiro(total)) {
+      return `❌ Dinheiro insuficiente! ${quantidade}x ${item.nome} custa $${total}.`;
+    }
+    for (let i = 0; i < quantidade; i++) treinador.adicionarItem(item);
+    return `🛒 Você comprou ${quantidade}x ${item.nome} por $${total}.`;
   }
 }
 
@@ -902,7 +1112,12 @@ export class Batalha {
   private estado: StatusBatalha = StatusBatalha.EM_ANDAMENTO;
   private filaDeAcoes: Acao[] = [];
 
-  constructor(public treinador1: Treinador, public treinador2: Treinador) {}
+  constructor(public treinador1: Treinador, public treinador2: Treinador) {
+    // Selvagem (matinho): 1 contra 1. Contra treinadores: sempre 2 contra 2.
+    const limite = (treinador1.isSelvagem || treinador2.isSelvagem) ? 1 : 2;
+    treinador1.definirLimiteAtivos(limite);
+    treinador2.definirLimiteAtivos(limite);
+  }
 
   public registrarAcao(acao: Acao): void { this.filaDeAcoes.push(acao); }
 
@@ -989,6 +1204,14 @@ export class Batalha {
     const logsStatus = this.processarEfeitosFimDeTurno();
     logs.push(...logsStatus);
 
+    // Reservas de NPCs/selvagens entram no lugar dos desmaiados
+    for (const t of [this.treinador1, this.treinador2]) {
+      if (!t.substituicaoAutomatica || this.estado === StatusBatalha.FINALIZADA) continue;
+      for (const m of t.reporAtivosDesmaiados()) {
+        logs.push(`🔁 ${t.nome} enviou ${m.nome} para a batalha!`);
+      }
+    }
+
     this.verificarFimDeJogo();
     return logs;
   }
@@ -1056,6 +1279,9 @@ export class Batalha {
       };
       resetarEquipe(this.treinador1);
       resetarEquipe(this.treinador2);
+      // Fora de batalha o padrão volta a ser 2 ativos
+      this.treinador1.definirLimiteAtivos(2);
+      this.treinador2.definirLimiteAtivos(2);
     }
   }
 }
