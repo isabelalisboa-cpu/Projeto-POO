@@ -10,7 +10,7 @@ export enum Elemento {
 
 export enum Estado {
   NORMAL = "Normal", CONGELADO = "Congelado", DORMINDO = "Dormindo",
-  CONFUSO = "Confuso", LAMA = "Lama", QUEIMADO = "Queimado", SANGRANDO = "Sangrando"
+  CONFUSO = "Confuso", LAMA = "Lama", QUEIMADO = "Queimado", SANGRANDO = "Sangrando", HIBERNANDO = "Hibernando"
 }
 
 export enum StatusBatalha {
@@ -60,7 +60,18 @@ export const TabelaReacoes: Record<string, string> = {
   [`${Elemento.ELETRICO}_${Elemento.AGUA}`]: "Confusao",
   [`${Elemento.AGUA}_${Elemento.GELO}`]: "Congelamento",
   [`${Elemento.GELO}_${Elemento.AGUA}`]: "Congelamento",
+  [`${Elemento.GELO}_${Elemento.FOGO}`]: "Derretimento",
+  [`${Elemento.FOGO}_${Elemento.GELO}`]: "Derretimento",
+  [`${Elemento.PLANTA}_${Elemento.GELO}`]: "Hibernacao",
+  [`${Elemento.GELO}_${Elemento.PLANTA}`]: "Hibernacao",
+  [`${Elemento.PEDRA}_${Elemento.GELO}`]: "Estilhaco",
+  [`${Elemento.GELO}_${Elemento.PEDRA}`]: "Estilhaco",
 };
+
+// Mística: ao aplicar o elemento Místico, há 25% de chance de gerar uma reação aleatória.
+// O sorteio usa todas as reações da tabela (sem repetir nomes) + Cegueira.
+export const CHANCE_MISTICA = 0.25;
+export const REACOES_ALEATORIAS: string[] = [...new Set(Object.values(TabelaReacoes)), "Cegueira", "Sangramento"];
 
 // ==========================================
 // 3. CLASSES BASE (ATAQUE E ITEM)
@@ -117,6 +128,17 @@ export class ItemCaptura extends Item {
 export const MAX_STACKS_CEGUEIRA = 5;
 export const REDUCAO_PRECISAO_POR_STACK = 0.05;
 
+// Estilhaço: dano (fração da vida máxima) que o monstrinho leva ao entrar em campo sobre os fragmentos.
+export const DANO_ESTILHACO = 0.1;
+
+// Captura: experiência dada a cada monstrinho ativo = nível do capturado * este valor.
+export const XP_CAPTURA_POR_NIVEL = 10;
+
+// Início do jogo
+export const NIVEL_INICIAL = 5;
+export const CAPTURADORES_INICIAIS = 10;
+export const POCOES_INICIAIS = 10;
+
 // ==========================================
 // 4. CLASSE ABSTRATA MONSTRINHO
 // ==========================================
@@ -127,6 +149,7 @@ export abstract class Monstrinho {
   protected estados: Estado[] = [];
   protected modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
   protected stacksCegueira: number = 0; // cada stack reduz a precisão em 5% (máx. 5)
+  protected turnosHibernacao: number = 0; // quantos ataques ainda serão impedidos pela Hibernação
   protected tabelaDeAprendizado: Record<number, Ataque> = {};
   protected ataquePendente: Ataque | null = null;
 
@@ -172,6 +195,27 @@ export abstract class Monstrinho {
   public curar(valor: number): void { this.vidaAtual = Math.min(this.vidaMaxima, this.vidaAtual + valor); }
   public aplicarModificador(status: 'ataque' | 'defesa' | 'velocidade' | 'precisao', multiplicador: number): void {
     this.modificadores[status] *= multiplicador;
+  }
+
+  /** Hibernação: o monstrinho não pode atacar pelos próximos `turnos` turnos (ou até ser atacado). */
+  public hibernar(turnos: number = 3): void {
+    this.adicionarEstado(Estado.HIBERNANDO);
+    this.turnosHibernacao = turnos;
+  }
+
+  /** Gasta um turno de hibernação (quando o monstrinho tenta agir). Retorna quantos restam. */
+  public consumirTurnoHibernacao(): number {
+    this.turnosHibernacao = Math.max(0, this.turnosHibernacao - 1);
+    if (this.turnosHibernacao === 0) this.removerEstado(Estado.HIBERNANDO);
+    return this.turnosHibernacao;
+  }
+
+  /** Acorda da hibernação (ex.: ao ser atacado). Retorna true se estava hibernando. */
+  public acordarHibernacao(): boolean {
+    if (!this.temEstado(Estado.HIBERNANDO)) return false;
+    this.turnosHibernacao = 0;
+    this.removerEstado(Estado.HIBERNANDO);
+    return true;
   }
 
   /** Adiciona 1 stack de cegueira. Retorna false se já estiver no máximo. */
@@ -280,6 +324,7 @@ export abstract class Monstrinho {
   public resetarAposBatalha(): void {
     this.modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
     this.stacksCegueira = 0;
+    this.turnosHibernacao = 0;
     this.limparElementos();
     this.estados = []; 
   }
@@ -626,6 +671,7 @@ export const MAX_EQUIPE = 6; // máximo de monstrinhos que um treinador leva em 
 
 export class Treinador {
   public ativos: Monstrinho[] = [];
+  public fragmentos: Elemento | null = null; // Estilhaço: elemento aplicado em quem entrar em campo
   public substituicaoAutomatica: boolean = false; // true para NPCs/selvagens: reserva entra sozinho quando o ativo desmaia
   public mochila: Item[] = [];
   public armazenamento: Monstrinho[] = [];
@@ -928,6 +974,28 @@ export class GramaAlta {
 }
 
 // ==========================================
+// 7.4 INÍCIO DO JOGO
+// ==========================================
+export type EscolhaInicial = "fogo" | "agua" | "planta";
+
+/** Cria o monstrinho inicial escolhido pelo jogador, já no nível 5. */
+export function criarMonstrinhoInicial(escolha: EscolhaInicial): Monstrinho {
+  switch (escolha) {
+    case "fogo":   return new Frilizard(NIVEL_INICIAL);
+    case "agua":   return new Ocelly(NIVEL_INICIAL);
+    case "planta": return new Verdalisk(NIVEL_INICIAL);
+  }
+}
+
+/** Cria o jogador: monstrinho inicial nível 5, 10 Capturadores Comuns e 10 Poções Iniciais. */
+export function criarJogador(nome: string, escolha: EscolhaInicial): Treinador {
+  const jogador = new Treinador(nome, [criarMonstrinhoInicial(escolha)]);
+  for (let i = 0; i < CAPTURADORES_INICIAIS; i++) jogador.adicionarItem(CapturadorComum);
+  for (let i = 0; i < POCOES_INICIAIS; i++) jogador.adicionarItem(PocaoInicial);
+  return jogador;
+}
+
+// ==========================================
 // 7.5 HOSPITAL E LOJA
 // ==========================================
 export class Hospital {
@@ -1000,9 +1068,20 @@ export class GerenciadorDeReacoes {
   ): string | null {
     const mensagens: string[] = [];
 
+    // Mística: 25% de chance de gerar uma reação aleatória ao aplicar o elemento Místico
+    if (elemento === Elemento.MISTICO) {
+      const msgMistica = GerenciadorDeReacoes.aplicarMistica(alvo, atacante, batalha, danoCausado, profundidade);
+      if (msgMistica) mensagens.push(msgMistica);
+    }
+
     // Cegueira: ocorre ao aplicar Luz em qualquer monstrinho, sem precisar de outro elemento aplicado
     if (elemento === Elemento.LUZ) {
       mensagens.push(GerenciadorDeReacoes.aplicarCegueira(alvo));
+    }
+
+    // Sangramento: ocorre ao aplicar Escuridão em qualquer monstrinho, sem precisar de outro elemento
+    if (elemento === Elemento.ESCURIDAO) {
+      mensagens.push(GerenciadorDeReacoes.aplicarSangramento(alvo));
     }
 
     const combinacao = alvo.aplicarElemento(elemento);
@@ -1019,6 +1098,30 @@ export class GerenciadorDeReacoes {
     }
 
     return mensagens.length > 0 ? mensagens.join("; ") : null;
+  }
+
+  /** Reação Mística: chance de gerar uma reação aleatória (qualquer reação existente). */
+  public static aplicarMistica(
+    alvo: Monstrinho,
+    atacante: Monstrinho,
+    batalha: Batalha,
+    danoCausado: number,
+    profundidade: number
+  ): string | null {
+    if (Math.random() >= CHANCE_MISTICA) return null;
+    const sorteada = REACOES_ALEATORIAS[Math.floor(Math.random() * REACOES_ALEATORIAS.length)];
+    console.log(`🔮 REAÇÃO ATIVADA em ${alvo.nome}: Mística!`);
+    // Se sortear Redemoinho, o elemento espalhado é o Místico
+    GerenciadorDeReacoes.executarEfeito(sorteada, alvo, atacante, batalha, danoCausado, profundidade, Elemento.MISTICO);
+    return `Reação: Mística → ${sorteada}`;
+  }
+
+  /** Reação de Sangramento: perde parte da vida a cada turno. Sem stacks. */
+  public static aplicarSangramento(alvo: Monstrinho): string {
+    if (alvo.temEstado(Estado.SANGRANDO)) return "Sangramento já ativo";
+    alvo.adicionarEstado(Estado.SANGRANDO);
+    console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: Sangramento!`);
+    return "Reação: Sangramento";
   }
 
   /** Reação de Cegueira: -5% de precisão por stack, até 5 stacks. */
@@ -1043,6 +1146,22 @@ export class GerenciadorDeReacoes {
     const nomeReacao = TabelaReacoes[chave];
     if (!nomeReacao) return false;
 
+    const elementoEspalhavel = elementoAplicado === Elemento.VENTO ? elementoNovo : elementoAplicado;
+    GerenciadorDeReacoes.executarEfeito(nomeReacao, alvo, atacante, batalha, danoCausado, profundidade, elementoEspalhavel, elementoAplicado);
+    return true;
+  }
+
+  /** Executa o efeito de uma reação pelo nome. Usado pelas reações normais e pela Mística. */
+  public static executarEfeito(
+    nomeReacao: string,
+    alvo: Monstrinho,
+    atacante: Monstrinho,
+    batalha: Batalha,
+    danoCausado: number,
+    profundidade: number,
+    elementoEspalhavel: Elemento,
+    elementoPrimeiro?: Elemento // elemento que estava aplicado antes (usado pelo Estilhaço)
+  ): void {
     console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: ${nomeReacao}!`);
     switch (nomeReacao) {
       case "Vaporizacao":
@@ -1073,7 +1192,7 @@ export class GerenciadorDeReacoes {
       case "Redemoinho": {
         // Espalha o outro elemento (o que não é Vento) para o companheiro de batalha
         if (profundidade >= 1) break; // evita cadeia infinita de reações
-        const elementoEspalhado = elementoAplicado === Elemento.VENTO ? elementoNovo : elementoAplicado;
+        const elementoEspalhado = elementoEspalhavel;
         const companheiros = batalha.getAtivosDoTime(alvo).filter(m => m !== alvo && m.getVida() > 0);
         for (const comp of companheiros) {
           console.log(`   -> 🌪️ O redemoinho espalhou ${elementoEspalhado} para ${comp.nome}!`);
@@ -1099,8 +1218,44 @@ export class GerenciadorDeReacoes {
       case "Congelamento":
         alvo.adicionarEstado(Estado.CONGELADO);
         break;
+
+      case "Derretimento":
+        // Gelo + Fogo: os dois elementos são consumidos e Água é aplicada no lugar
+        alvo.limparElementos();
+        alvo.aplicarElemento(Elemento.AGUA);
+        console.log(`   -> 💧 O gelo derreteu e ${alvo.nome} ficou molhado (Água aplicada)!`);
+        break;
+
+      case "Cegueira":
+        // Usada quando a Cegueira é sorteada pela Mística (a Cegueira normal vem de aplicarCegueira)
+        if (alvo.adicionarStackCegueira()) {
+          console.log(`   -> 🌑 ${alvo.nome} ficou cego (${alvo.getStacksCegueira()}/${MAX_STACKS_CEGUEIRA})!`);
+        }
+        break;
+
+      case "Sangramento":
+        // Usada quando o Sangramento é sorteado pela Mística (o normal vem de aplicarSangramento)
+        alvo.adicionarEstado(Estado.SANGRANDO);
+        break;
+
+      case "Hibernacao":
+        // Grama + Gelo: o alvo não pode atacar por 3 turnos, mas acorda ao ser atacado
+        alvo.hibernar(3);
+        console.log(`   -> 😴 ${alvo.nome} entrou em hibernação por 3 turnos!`);
+        break;
+
+      case "Estilhaco": {
+        // Pedra + Gelo: deixa fragmentos no campo do alvo. Quem entrar em campo leva dano e recebe o
+        // elemento que estava aplicado primeiro. (Se vier da Mística, sorteia Pedra ou Gelo.)
+        const treinador = batalha.getTreinadorDe(alvo);
+        if (treinador) {
+          const el = elementoPrimeiro ?? (Math.random() < 0.5 ? Elemento.PEDRA : Elemento.GELO);
+          treinador.fragmentos = el;
+          console.log(`   -> 💎 Fragmentos de ${el} se espalharam pelo campo de ${treinador.nome}!`);
+        }
+        break;
+      }
     }
-    return true;
   }
 }
 
@@ -1127,7 +1282,12 @@ export class AcaoAtacar implements Acao {
 export class AcaoTrocar implements Acao {
   prioridade = 3;
   constructor(public usuario: Treinador, public antigoMonstrinho: Monstrinho, public novoMonstrinho: Monstrinho) {}
-  executar(batalha: Batalha): void { this.usuario.trocarMonstrinho(this.antigoMonstrinho, this.novoMonstrinho); }
+  executar(batalha: Batalha): void {
+    if (this.usuario.trocarMonstrinho(this.antigoMonstrinho, this.novoMonstrinho)) {
+      const log = batalha.aoEntrarEmCampo(this.usuario, this.novoMonstrinho);
+      if (log) console.log(log);
+    }
+  }
 }
 
 export class AcaoItem implements Acao {
@@ -1158,13 +1318,45 @@ export class Batalha {
 
   /** Retorna os monstrinhos ativos do time ao qual o monstrinho pertence. */
   public getAtivosDoTime(m: Monstrinho): Monstrinho[] {
-    const treinador = [this.treinador1, this.treinador2]
-      .find(t => t.ativos.includes(m) || t.equipe.includes(m));
+    const treinador = this.getTreinadorDe(m);
     return treinador ? treinador.ativos : [m];
+  }
+
+  /** Retorna o treinador dono do monstrinho (ou undefined). */
+  public getTreinadorDe(m: Monstrinho): Treinador | undefined {
+    return [this.treinador1, this.treinador2]
+      .find(t => t.ativos.includes(m) || t.equipe.includes(m));
+  }
+
+  /**
+   * Chamado quando um monstrinho entra em campo (troca ou reposição).
+   * Se há fragmentos de Estilhaço no campo do treinador, o monstrinho leva dano e recebe o elemento
+   * guardado. Os fragmentos são usados (somem) depois disso.
+   */
+  public aoEntrarEmCampo(treinador: Treinador, m: Monstrinho): string | null {
+    const elemento = treinador.fragmentos;
+    if (!elemento) return null;
+    treinador.fragmentos = null;
+
+    const dano = Math.max(1, Math.floor(m.getVidaMaxima() * DANO_ESTILHACO));
+    m.receberDano(dano);
+    let msg = `💎 Os estilhaços feriram ${m.nome} (${dano} de dano)`;
+    if (m.getVida() > 0) {
+      const reacao = GerenciadorDeReacoes.aplicarElementoComReacao(m, elemento, m, this, dano, 1);
+      msg += ` e aplicaram ${elemento}` + (reacao ? ` (${reacao})` : "");
+    }
+    this.verificarFimDeJogo();
+    return msg + "!";
   }
 
   /** Checa estados que impedem o monstrinho de agir. Retorna mensagem se ele não agiu. */
   private podeAgir(m: Monstrinho): string | null {
+    if (m.temEstado(Estado.HIBERNANDO)) {
+      const restantes = m.consumirTurnoHibernacao();
+      return restantes > 0
+        ? `😴 ${m.nome} está hibernando e não pode atacar! (restam ${restantes} turno(s))`
+        : `😴 ${m.nome} está hibernando e não pode atacar! (acorda no próximo turno)`;
+    }
     if (m.temEstado(Estado.CONGELADO)) {
       if (Math.random() < 0.2) { m.removerEstado(Estado.CONGELADO); return null; }
       return `🧊 ${m.nome} está congelado e não conseguiu agir!`;
@@ -1208,6 +1400,8 @@ export class Batalha {
     const dano = Math.floor(danoBase * (Math.random() * 0.15 + 0.85));
     
     defensor.receberDano(dano);
+    // Ser atacado acorda da Hibernação (feito antes das reações, para não acordar na hora que hiberna)
+    if (defensor.acordarHibernacao()) console.log(`⏰ ${defensor.nome} acordou da hibernação!`);
     
     // Lógica de Elementos e Reações (o elemento vem do monstrinho)
     const elementoNovo = atacante.getElementoInerente();
@@ -1245,6 +1439,8 @@ export class Batalha {
       if (!t.substituicaoAutomatica || this.estado === StatusBatalha.FINALIZADA) continue;
       for (const m of t.reporAtivosDesmaiados()) {
         logs.push(`🔁 ${t.nome} enviou ${m.nome} para a batalha!`);
+        const logEstilhaco = this.aoEntrarEmCampo(t, m);
+        if (logEstilhaco) logs.push(logEstilhaco);
       }
     }
 
@@ -1271,9 +1467,13 @@ export class Batalha {
     if (roll <= a) {
       oponente.equipe = oponente.equipe.filter(m => m !== alvo);
       oponente.ativos = oponente.ativos.filter(m => m !== alvo);
+      // Quem estava em campo (vivo) antes da captura ganha experiência pelo nível do capturado
+      const beneficiados = treinador.ativos.filter(m => m.getVida() > 0 && m !== alvo);
+      const xp = alvo.getNivel() * XP_CAPTURA_POR_NIVEL;
       treinador.capturarMonstrinho(alvo);
+      beneficiados.forEach(m => m.ganharExperiencia(xp));
       this.verificarFimDeJogo();
-      return `✨ CLICK! ${alvo.nome} foi capturado com sucesso!`;
+      return `✨ CLICK! ${alvo.nome} foi capturado com sucesso! Seus monstrinhos ativos ganharam ${xp} de experiência.`;
     } else {
       return `❌ Ah não! ${alvo.nome} escapou da captura!`;
     }
@@ -1315,6 +1515,9 @@ export class Batalha {
       };
       resetarEquipe(this.treinador1);
       resetarEquipe(this.treinador2);
+      // Os fragmentos de Estilhaço somem ao fim da batalha
+      this.treinador1.fragmentos = null;
+      this.treinador2.fragmentos = null;
       // Fora de batalha o padrão volta a ser 2 ativos
       this.treinador1.definirLimiteAtivos(2);
       this.treinador2.definirLimiteAtivos(2);
