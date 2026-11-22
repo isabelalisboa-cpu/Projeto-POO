@@ -41,9 +41,11 @@ export const TabelaReacoes: Record<string, string> = {
   [`${Elemento.FOGO}_${Elemento.AGUA}`]: "Vaporizacao",
   [`${Elemento.AGUA}_${Elemento.FOGO}`]: "Vaporizacao",
   [`${Elemento.FOGO}_${Elemento.PLANTA}`]: "Queimadura",
+  [`${Elemento.PLANTA}_${Elemento.FOGO}`]: "Queimadura",          // CORRIGIDO: direção inversa faltava
   [`${Elemento.AGUA}_${Elemento.PLANTA}`]: "Vinhas",
   [`${Elemento.PLANTA}_${Elemento.AGUA}`]: "Vinhas",
   [`${Elemento.ELETRICO}_${Elemento.PEDRA}`]: "Condutividade",
+  [`${Elemento.PEDRA}_${Elemento.ELETRICO}`]: "Condutividade",    // CORRIGIDO: direção inversa faltava
   [`${Elemento.VENTO}_${Elemento.FOGO}`]: "Redemoinho",
   [`${Elemento.FOGO}_${Elemento.VENTO}`]: "Dissipa",
   [`${Elemento.AGUA}_${Elemento.PEDRA}`]: "Lama",
@@ -747,28 +749,118 @@ export class GramaAlta {
 }
 
 // ==========================================
-// 8. GERENCIADOR DE REAÇÕES (RESTAURADO)
+// 8. GERENCIADOR DE REAÇÕES
 // ==========================================
+
+// Condutividade: dano AoE = dano do golpe * FATOR_BASE * BONUS.
+// Ajuste esses dois valores para balancear a reação.
+const CONDUTIVIDADE_FATOR_BASE = 0.5;
+const CONDUTIVIDADE_BONUS = 1.5;
+
 export class GerenciadorDeReacoes {
-  public static processarReacao(elementoAplicado: Elemento, elementoNovo: Elemento, alvo: Monstrinho, atacante: Monstrinho): boolean {
+
+  /**
+   * Aplica um elemento no alvo e resolve a reação, se houver.
+   * Retorna uma mensagem descritiva (ou null se foi só a primeira aplicação).
+   */
+  public static aplicarElementoComReacao(
+    alvo: Monstrinho,
+    elemento: Elemento,
+    atacante: Monstrinho,
+    batalha: Batalha,
+    danoCausado: number,
+    profundidade: number = 0
+  ): string | null {
+    const combinacao = alvo.aplicarElemento(elemento);
+    if (!combinacao) return null;
+
+    const reagiu = GerenciadorDeReacoes.processarReacao(
+      combinacao[0], combinacao[1], alvo, atacante, batalha, danoCausado, profundidade
+    );
+
+    if (!reagiu) {
+      alvo.aplicarElemento(elemento); // Substitui o antigo
+      return `Elemento ${elemento} substituiu o anterior`;
+    }
+    return `Reação: ${TabelaReacoes[`${combinacao[0]}_${combinacao[1]}`]}`;
+  }
+
+  public static processarReacao(
+    elementoAplicado: Elemento,
+    elementoNovo: Elemento,
+    alvo: Monstrinho,
+    atacante: Monstrinho,
+    batalha: Batalha,
+    danoCausado: number = 0,
+    profundidade: number = 0
+  ): boolean {
     const chave = `${elementoAplicado}_${elementoNovo}`;
     const nomeReacao = TabelaReacoes[chave];
     if (!nomeReacao) return false;
 
     console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: ${nomeReacao}!`);
     switch (nomeReacao) {
-      case "Vaporizacao": alvo.aplicarModificador('defesa', 0.8); break;
-      case "Queimadura": alvo.adicionarEstado(Estado.QUEIMADO); break;
-      case "Dissipa": break;
-      case "Lama": alvo.adicionarEstado(Estado.LAMA); break;
-      default: console.log(`   -> Efeito de ${nomeReacao} ainda não implementado.`);
+      case "Vaporizacao":
+        alvo.aplicarModificador('defesa', 0.8);
+        break;
+
+      case "Queimadura":
+        alvo.adicionarEstado(Estado.QUEIMADO);
+        break;
+
+      case "Vinhas":
+        // Diminui a velocidade do monstrinho
+        alvo.aplicarModificador('velocidade', 0.8);
+        console.log(`   -> ${alvo.nome} ficou preso nas vinhas (velocidade reduzida)!`);
+        break;
+
+      case "Condutividade": {
+        // Dano AoE em todos os monstrinhos ativos do time do alvo, com dano aumentado
+        const danoAoe = Math.max(1, Math.floor(danoCausado * CONDUTIVIDADE_FATOR_BASE * CONDUTIVIDADE_BONUS));
+        const time = batalha.getAtivosDoTime(alvo).filter(m => m.getVida() > 0);
+        for (const m of time) {
+          m.receberDano(danoAoe);
+          console.log(`   -> ⚡ Condutividade causou ${danoAoe} de dano em ${m.nome}!`);
+        }
+        break;
+      }
+
+      case "Redemoinho": {
+        // Espalha o outro elemento (o que não é Vento) para o companheiro de batalha
+        if (profundidade >= 1) break; // evita cadeia infinita de reações
+        const elementoEspalhado = elementoAplicado === Elemento.VENTO ? elementoNovo : elementoAplicado;
+        const companheiros = batalha.getAtivosDoTime(alvo).filter(m => m !== alvo && m.getVida() > 0);
+        for (const comp of companheiros) {
+          console.log(`   -> 🌪️ O redemoinho espalhou ${elementoEspalhado} para ${comp.nome}!`);
+          const msg = GerenciadorDeReacoes.aplicarElementoComReacao(
+            comp, elementoEspalhado, atacante, batalha, danoCausado, profundidade + 1
+          );
+          if (msg) console.log(`      (${comp.nome}: ${msg})`);
+        }
+        break;
+      }
+
+      case "Dissipa":
+        break; // intencional: sem efeito
+
+      case "Lama":
+        alvo.adicionarEstado(Estado.LAMA);
+        break;
+
+      case "Confusao":
+        alvo.adicionarEstado(Estado.CONFUSO);
+        break;
+
+      case "Congelamento":
+        alvo.adicionarEstado(Estado.CONGELADO);
+        break;
     }
     return true;
   }
 }
 
 // ==========================================
-// 9. AÇÕES E BATALHA (RESTAURADO 2x2 E STATUS)
+// 9. AÇÕES E BATALHA
 // ==========================================
 export interface Acao {
   prioridade: number;
@@ -780,9 +872,9 @@ export class AcaoAtacar implements Acao {
   prioridade = 1;
   constructor(public usuario: Monstrinho, public alvo: Monstrinho, public ataque: Ataque) {}
   executar(batalha: Batalha): void {
-    if (this.usuario.temEstado(Estado.DORMINDO) || this.usuario.temEstado(Estado.CONGELADO)) return;
     if (!this.ataque.temPP()) return;
     this.ataque.consumirPP();
+    // A checagem de Congelado/Dormindo/Confuso agora é feita dentro de processarAtaque
     batalha.processarAtaque(this.usuario, this.alvo, this.ataque);
   }
 }
@@ -814,8 +906,40 @@ export class Batalha {
 
   public registrarAcao(acao: Acao): void { this.filaDeAcoes.push(acao); }
 
+  /** Retorna os monstrinhos ativos do time ao qual o monstrinho pertence. */
+  public getAtivosDoTime(m: Monstrinho): Monstrinho[] {
+    const treinador = [this.treinador1, this.treinador2]
+      .find(t => t.ativos.includes(m) || t.equipe.includes(m));
+    return treinador ? treinador.ativos : [m];
+  }
+
+  /** Checa estados que impedem o monstrinho de agir. Retorna mensagem se ele não agiu. */
+  private podeAgir(m: Monstrinho): string | null {
+    if (m.temEstado(Estado.CONGELADO)) {
+      if (Math.random() < 0.2) { m.removerEstado(Estado.CONGELADO); return null; }
+      return `🧊 ${m.nome} está congelado e não conseguiu agir!`;
+    }
+    if (m.temEstado(Estado.DORMINDO)) {
+      if (Math.random() < 0.33) { m.removerEstado(Estado.DORMINDO); return null; }
+      return `💤 ${m.nome} está dormindo!`;
+    }
+    if (m.temEstado(Estado.CONFUSO)) {
+      if (Math.random() < 0.33) { m.removerEstado(Estado.CONFUSO); return null; }
+      if (Math.random() < 0.33) {
+        const dano = Math.max(1, Math.floor(m.getVidaMaxima() * 0.1));
+        m.receberDano(dano);
+        return `😵 ${m.nome} está confuso e se machucou (${dano} de dano)!`;
+      }
+    }
+    return null;
+  }
+
   public processarAtaque(atacante: Monstrinho, defensor: Monstrinho, ataque: Ataque): string {
     if (defensor.getVida() <= 0) return "";
+
+    const bloqueio = this.podeAgir(atacante);
+    if (bloqueio) { this.verificarFimDeJogo(); return bloqueio; }
+
     if (!ataque.temPP()) return `${atacante.nome} está sem PP!`;
     
     // Precisão
@@ -834,20 +958,12 @@ export class Batalha {
     
     defensor.receberDano(dano);
     
-    // Lógica de Elementos e Reações
+    // Lógica de Elementos e Reações (o elemento vem do monstrinho)
     const elementoNovo = atacante.getElementoInerente();
-    const combinacao = defensor.aplicarElemento(elementoNovo);
-    let msgReacao = "";
-    
-    if (combinacao) {
-      const teveReacao = GerenciadorDeReacoes.processarReacao(combinacao[0], combinacao[1], defensor, atacante);
-      if (!teveReacao) {
-        defensor.aplicarElemento(elementoNovo); // Substitui o antigo
-        msgReacao = ` (Elemento ${elementoNovo} substituiu o anterior)`;
-      } else {
-        msgReacao = ` (Reação: ${TabelaReacoes[`${combinacao[0]}_${combinacao[1]}`]})`;
-      }
-    }
+    const resultadoReacao = GerenciadorDeReacoes.aplicarElementoComReacao(
+      defensor, elementoNovo, atacante, this, dano
+    );
+    const msgReacao = resultadoReacao ? ` (${resultadoReacao})` : "";
 
     this.verificarFimDeJogo();
     
