@@ -113,6 +113,10 @@ export class ItemCaptura extends Item {
   }
 }
 
+// Cegueira: cada stack reduz a precisão do monstrinho em 5%, com no máximo 5 stacks.
+export const MAX_STACKS_CEGUEIRA = 5;
+export const REDUCAO_PRECISAO_POR_STACK = 0.05;
+
 // ==========================================
 // 4. CLASSE ABSTRATA MONSTRINHO
 // ==========================================
@@ -122,6 +126,7 @@ export abstract class Monstrinho {
   protected elementosAplicados: Elemento[] = [];
   protected estados: Estado[] = [];
   protected modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
+  protected stacksCegueira: number = 0; // cada stack reduz a precisão em 5% (máx. 5)
   protected tabelaDeAprendizado: Record<number, Ataque> = {};
   protected ataquePendente: Ataque | null = null;
 
@@ -148,7 +153,11 @@ export abstract class Monstrinho {
   public getAtaque(): number { return Math.floor(this.ataque * this.modificadores.ataque); }
   public getDefesa(): number { return Math.floor(this.defesa * this.modificadores.defesa); }
   public getVelocidade(): number { return Math.floor(this.velocidade * this.modificadores.velocidade); }
-  public getPrecisao(): number { return Math.floor(this.precisao * this.modificadores.precisao); }
+  public getPrecisao(): number {
+    const fatorCegueira = 1 - this.stacksCegueira * REDUCAO_PRECISAO_POR_STACK;
+    return Math.floor(this.precisao * this.modificadores.precisao * fatorCegueira);
+  }
+  public getStacksCegueira(): number { return this.stacksCegueira; }
   public getElementoInerente(): Elemento { return this.elementoInerente; }
   public getNivel(): number { return this.nivel; }
   public getExperiencia(): number { return this.experiencia; }
@@ -163,6 +172,13 @@ export abstract class Monstrinho {
   public curar(valor: number): void { this.vidaAtual = Math.min(this.vidaMaxima, this.vidaAtual + valor); }
   public aplicarModificador(status: 'ataque' | 'defesa' | 'velocidade' | 'precisao', multiplicador: number): void {
     this.modificadores[status] *= multiplicador;
+  }
+
+  /** Adiciona 1 stack de cegueira. Retorna false se já estiver no máximo. */
+  public adicionarStackCegueira(): boolean {
+    if (this.stacksCegueira >= MAX_STACKS_CEGUEIRA) return false;
+    this.stacksCegueira++;
+    return true;
   }
 
   // --- Métodos de Ataque e Nível ---
@@ -263,6 +279,7 @@ export abstract class Monstrinho {
 
   public resetarAposBatalha(): void {
     this.modificadores = { ataque: 1, defesa: 1, velocidade: 1, precisao: 1 };
+    this.stacksCegueira = 0;
     this.limparElementos();
     this.estados = []; 
   }
@@ -981,18 +998,36 @@ export class GerenciadorDeReacoes {
     danoCausado: number,
     profundidade: number = 0
   ): string | null {
-    const combinacao = alvo.aplicarElemento(elemento);
-    if (!combinacao) return null;
+    const mensagens: string[] = [];
 
-    const reagiu = GerenciadorDeReacoes.processarReacao(
-      combinacao[0], combinacao[1], alvo, atacante, batalha, danoCausado, profundidade
-    );
-
-    if (!reagiu) {
-      alvo.aplicarElemento(elemento); // Substitui o antigo
-      return `Elemento ${elemento} substituiu o anterior`;
+    // Cegueira: ocorre ao aplicar Luz em qualquer monstrinho, sem precisar de outro elemento aplicado
+    if (elemento === Elemento.LUZ) {
+      mensagens.push(GerenciadorDeReacoes.aplicarCegueira(alvo));
     }
-    return `Reação: ${TabelaReacoes[`${combinacao[0]}_${combinacao[1]}`]}`;
+
+    const combinacao = alvo.aplicarElemento(elemento);
+    if (combinacao) {
+      const reagiu = GerenciadorDeReacoes.processarReacao(
+        combinacao[0], combinacao[1], alvo, atacante, batalha, danoCausado, profundidade
+      );
+      if (!reagiu) {
+        alvo.aplicarElemento(elemento); // Substitui o antigo
+        mensagens.push(`Elemento ${elemento} substituiu o anterior`);
+      } else {
+        mensagens.push(`Reação: ${TabelaReacoes[`${combinacao[0]}_${combinacao[1]}`]}`);
+      }
+    }
+
+    return mensagens.length > 0 ? mensagens.join("; ") : null;
+  }
+
+  /** Reação de Cegueira: -5% de precisão por stack, até 5 stacks. */
+  public static aplicarCegueira(alvo: Monstrinho): string {
+    if (!alvo.adicionarStackCegueira()) {
+      return `Cegueira já está no máximo (${MAX_STACKS_CEGUEIRA}/${MAX_STACKS_CEGUEIRA})`;
+    }
+    console.log(`✨ REAÇÃO ATIVADA em ${alvo.nome}: Cegueira!`);
+    return `Reação: Cegueira (${alvo.getStacksCegueira()}/${MAX_STACKS_CEGUEIRA}, precisão ${alvo.getPrecisao()}%)`;
   }
 
   public static processarReacao(
@@ -1157,8 +1192,9 @@ export class Batalha {
 
     if (!ataque.temPP()) return `${atacante.nome} está sem PP!`;
     
-    // Precisão
-    if (Math.random() * 100 > ataque.getPrecisao()) {
+    // Precisão: a do ataque multiplicada pela do monstrinho (afetada por cegueira e modificadores)
+    const precisaoEfetiva = ataque.getPrecisao() * atacante.getPrecisao() / 100;
+    if (Math.random() * 100 > precisaoEfetiva) {
       return `❌ ${atacante.nome} errou o ataque ${ataque.getNome()} em ${defensor.nome}!`;
     }
 
