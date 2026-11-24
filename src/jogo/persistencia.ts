@@ -8,8 +8,8 @@ import { Ataque, Elemento, Monstrinho, Treinador } from '../chuments';
 import { CONFIG } from '../config';
 import type { Direcao } from '../mapas/tipos';
 import { MAPAS } from '../mapas/registro';
-import { contarMochila, criarEspecie, definirAtivos, emSilencio, infoItem } from './catalogo';
-import type { EstadoJogo } from './jogo';
+import { contarMochila, criarEspecie, definirAtivos, emSilencio, infoItem } from '../../catalogo';
+import type { EstadoJogo } from '../../jogo';
 
 interface AtaqueSalvo {
   nome: string; poder: number; precisao: number; ppMaximo: number; pp: number;

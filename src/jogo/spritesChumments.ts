@@ -8,7 +8,7 @@
 import type { Elemento } from '../chuments';
 import { CONFIG } from '../config';
 import { urlRecurso } from '../motor/recursos';
-import { CORES_ELEMENTO } from './catalogo';
+import { CORES_ELEMENTO } from '../../catalogo';
 
 interface Registro { imagem: HTMLImageElement | null; estado: 'carregando' | 'pronto' | 'ausente' }
 const cache = new Map<string, Registro>();

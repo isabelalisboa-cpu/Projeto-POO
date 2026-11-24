@@ -1,6 +1,8 @@
 import { abrirMenuPrincipal } from './cenas/menuPrincipal';
 import { CONFIG } from './config';
 import { jogo } from './jogo/jogo';
+import { precarregarPersonagens } from './jogo/personagens';
+import { spriteDe } from './jogo/spritesChumments';
 import { MAPAS, validarMapas } from './mapas/registro';
 import { Entrada } from './motor/entrada';
 import { carregarImagem, urlRecurso } from './motor/recursos';
@@ -15,6 +17,8 @@ validarMapas();
 for (const mapa of Object.values(MAPAS)) {
   carregarImagem(urlRecurso('assets/mapas/' + mapa.imagem)).catch(() => { /* o mapa avisa ao ser aberto */ });
 }
+
+precarregarPersonagens();
 
 abrirMenuPrincipal();
 
@@ -38,4 +42,4 @@ function quadro(agora: number): void {
 requestAnimationFrame(quadro);
 
 // Acesso pelo console do navegador, útil para testes: __chumments.jogo.estado
-(window as unknown as { __chumments: unknown }).__chumments = { jogo, CONFIG };
+(window as unknown as { __chumments: unknown }).__chumments = { jogo, CONFIG, spriteDe };
