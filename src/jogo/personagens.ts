@@ -1,6 +1,9 @@
 // Personagens desenhados por código (jogador e NPCs sem imagem própria).
 // Grade de 16 x 24 "pixels"; (x, y) = pés do personagem; altura = tamanho final.
+import { CONFIG } from '../config';
 import type { Aparencia, Direcao } from '../mapas/tipos';
+import { carregarImagem, imagemPronta, urlRecurso } from '../motor/recursos';
+import { FOLHAS, type FolhaPersonagem } from './folhasPersonagens';
 
 const CONTORNO = '#1d2540';
 const SAPATO = '#2b2f45';
@@ -90,3 +93,83 @@ export function desenharPersonagem(
   }
   ctx.restore();
 }
+
+
+// =====================================================================
+// Personagens com folha de sprites (PNG). Se a folha não existir ou ainda
+// não tiver carregado, cai no personagem desenhado por código acima.
+// =====================================================================
+
+/** Como desenhar alguém: folha de sprites e/ou cores para o desenho por código. */
+export interface Visual {
+  sprite?: string;
+  aparencia?: Aparencia;
+  escala?: number;
+}
+
+const APARENCIA_PADRAO: Aparencia = { cabelo: '#5b4636', pele: '#f0c39a', roupa: '#7a86a8', calca: '#34406b' };
+/** Altura da figura dentro do quadro que corresponde a "tamanhoPersonagem" do mapa. */
+const ALTURA_FIGURA = 158;
+const QUADROS_POR_SEGUNDO = 7;
+
+function urlFolha(folha: FolhaPersonagem): string {
+  return urlRecurso(CONFIG.pastaPersonagens + folha.arquivo);
+}
+
+/** Carrega todas as folhas em segundo plano. */
+export function precarregarPersonagens(): void {
+  for (const [chave, folha] of Object.entries(FOLHAS)) {
+    carregarImagem(urlFolha(folha)).catch(() => console.warn(`[personagens] folha "${chave}" não encontrada: ${folha.arquivo}`));
+  }
+}
+
+export function visualJogador(sexo: string): Visual {
+  return { sprite: CONFIG.spritesJogador[sexo], aparencia: aparenciaJogador(sexo) };
+}
+
+/**
+ * Direção que o personagem consegue mostrar. Folhas só de perfil (esquerda/direita)
+ * trocam "cima"/"baixo" pelo lado indicado em "preferencia".
+ */
+export function direcaoPossivel(sprite: string | undefined, direcao: Direcao, preferencia: Direcao = 'esquerda'): Direcao {
+  const folha = sprite ? FOLHAS[sprite] : undefined;
+  if (!folha || folha.linhas.includes(direcao)) return direcao;
+  return folha.linhas.includes(preferencia) ? preferencia : folha.linhas[0];
+}
+
+/**
+ * Desenha um personagem com os pés em (x, y).
+ * tempoPasso: segundos andando (anima a caminhada) ou null para a pose parada.
+ */
+export function desenharFigura(
+  ctx: CanvasRenderingContext2D, visual: Visual,
+  x: number, y: number, altura: number, direcao: Direcao, tempoPasso: number | null,
+): void {
+  const tamanho = altura * (visual.escala ?? 1);
+  const folha = visual.sprite ? FOLHAS[visual.sprite] : undefined;
+  const img = folha ? imagemPronta(urlFolha(folha)) : undefined;
+
+  if (!folha || !img) {
+    const passo = tempoPasso === null ? 0 : [1, 0, 2, 0][Math.floor(tempoPasso * 9) % 4];
+    desenharPersonagem(ctx, x, y, tamanho, direcao, passo, visual.aparencia ?? APARENCIA_PADRAO);
+    return;
+  }
+
+  const dir = direcaoPossivel(visual.sprite, direcao);
+  const linha = folha.linhas.indexOf(dir);
+  const quadros = folha.andando[dir] ?? 0;
+  const coluna = tempoPasso === null || quadros === 0 ? 0 : 1 + (Math.floor(tempoPasso * QUADROS_POR_SEGUNDO) % quadros);
+
+  const escala = tamanho / ALTURA_FIGURA;
+  const w = folha.larguraQuadro * escala, h = folha.alturaQuadro * escala;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath(); ctx.ellipse(x, y - tamanho * 0.02, tamanho * 0.26, tamanho * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  // Os quadros têm 4 px de folga embaixo da figura.
+  ctx.drawImage(
+    img, coluna * folha.larguraQuadro, linha * folha.alturaQuadro, folha.larguraQuadro, folha.alturaQuadro,
+    x - w / 2, y - h + 4 * escala, w, h,
+  );
+  ctx.restore();

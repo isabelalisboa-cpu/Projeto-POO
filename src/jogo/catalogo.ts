@@ -5,8 +5,8 @@
 // =====================================================================
 import {
   Amperell, Ataque, CapturadorAvancado, CapturadorComum, CapturadorSupremo, Celestina,
-  Electrusa, Elemento, Estado, Fizzarolly, FizzyJr, Flareperor, Frilizard, Glaceow, Glacielle,
-  GramaAlta, Hurrihawk, Item, ItemCaptura, Jellerinna, Katanlisk, Lithoscorp, Lumi, Lumiel,
+  Batalha, Electrusa, Elemento, Estado, Fizzarolly, FizzyJr, Flareperor, Frilizard, Glaceow, Glacielle,
+  GramaAlta, Hospital, Hurrihawk, Item, ItemCaptura, Jellerinna, Katanlisk, Lithoscorp, Loja, Lumi, Lumiel,
   Monstrinho, Ocelly, PocaoAvancada, PocaoInicial, PocaoIntermediaria, Rockpion, Shadenight,
   TabelaEfetividade, Treinador, Verdalisk, Vitalizador, VitalizadorSupremo, Zephyling,
 } from '../chuments';
@@ -88,6 +88,15 @@ export function contarMochila(mochila: Item[]): { info: InfoItem; quantidade: nu
     .filter((g) => g.quantidade > 0);
 }
 
+// --- Hospital e Loja (classes do chuments.ts) -------------------------
+export const hospital = new Hospital();
+export const loja = new Loja();
+
+/** Preço do item no catálogo da Loja (undefined se ela não vende). */
+export function precoDe(item: Item): number | undefined {
+  return loja.catalogo.find((entrada) => entrada.item === item)?.preco;
+}
+
 export function ehCapturador(item: Item): item is ItemCaptura {
   return item instanceof ItemCaptura;
 }
@@ -97,19 +106,14 @@ export function vivos(lista: Monstrinho[]): Monstrinho[] {
   return lista.filter((m) => m.getVida() > 0);
 }
 
-/** Os dois primeiros chumments de pé são os que entram em campo. */
+/** Fora de batalha: os dois primeiros chumments de pé ficam como ativos. */
 export function definirAtivos(t: Treinador): void {
-  t.ativos = vivos(t.equipe).slice(0, 2);
+  t.definirLimiteAtivos(2);
 }
 
-/** Recupera vida, PP e limpa estados de toda a equipe. */
+/** Recupera vida, PP e limpa estados de toda a equipe (Treinador.curarEquipeCompleta). */
 export function recuperarEquipe(t: Treinador): void {
-  for (const m of t.equipe) {
-    m.resetarAposBatalha();
-    m.curar(m.getVidaMaxima());
-    m.restaurarTodosPP();
-  }
-  definirAtivos(t);
+  t.curarEquipeCompleta();
 }
 
 /** Executa algo sem que os console.log do chuments.ts apareçam (ex.: preparar selvagens). */
@@ -123,23 +127,25 @@ export function emSilencio<T>(fn: () => T): T {
 const grama = new GramaAlta();
 
 /**
- * Sorteia um selvagem com GramaAlta.explorar() (sempre nível 1) e o leva até o
- * nível desejado usando o próprio ganharExperiencia(), para que atributos e
- * ataques cresçam exatamente como os de um chumment do jogador.
+ * Encontro no mato. A batalha é criada por GramaAlta.iniciarBatalha() (1 contra 1, selvagem
+ * de nível 1). Em seguida o selvagem é levado ao nível do mapa com o próprio
+ * ganharExperiencia(), para que atributos e ataques cresçam como os de um chumment do jogador.
  */
-export function criarSelvagem(niveis: [number, number]): Monstrinho {
-  const m = grama.explorar();
+export function iniciarBatalhaSelvagem(jogador: Treinador, niveis: [number, number]): Batalha {
+  const batalha = grama.iniciarBatalha(jogador);
   const alvo = inteiroAleatorio(Math.min(...niveis), Math.max(...niveis));
   emSilencio(() => {
-    while (m.getNivel() < alvo && m.getNivel() < 30) {
-      m.ganharExperiencia(Math.max(1, xpParaProximoNivel(m) - m.getExperiencia()));
-      if (m.getAtaquePendente()) {
-        if (Math.random() < 0.6) m.resolverAtaquePendente(inteiroAleatorio(0, m.getAtaques().length - 1));
-        else m.cancelarAtaquePendente();
+    for (const m of batalha.treinador2.equipe) {
+      while (m.getNivel() < alvo && m.getNivel() < 30) {
+        m.ganharExperiencia(Math.max(1, xpParaProximoNivel(m) - m.getExperiencia()));
+        if (m.getAtaquePendente()) {
+          if (Math.random() < 0.6) m.resolverAtaquePendente(inteiroAleatorio(0, m.getAtaques().length - 1));
+          else m.cancelarAtaquePendente();
+        }
       }
     }
   });
-  return m;
+  return batalha;
 }
 
 /** Golpe de emergência quando nenhum ataque tem PP. */

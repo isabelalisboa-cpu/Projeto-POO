@@ -1,3 +1,5 @@
+import { FOLHAS } from '../jogo/folhasPersonagens';
+import { existeTreinador } from '../jogo/treinadores';
 import type { DefinicaoMapa } from './tipos';
 
 // Todo arquivo .ts dentro de definicoes/ é registrado automaticamente.
@@ -31,8 +33,14 @@ export function validarMapas(): string[] {
       }
     }
     for (const npc of mapa.npcs ?? []) {
-      if (!npc.aparencia && !npc.areaInteracao) {
-        problemas.push(`${mapa.id}: NPC "${npc.id}" sem aparência precisa de "areaInteracao".`);
+      if (!npc.sprite && !npc.aparencia && !npc.areaInteracao) {
+        problemas.push(`${mapa.id}: NPC "${npc.id}" sem sprite/aparência precisa de "areaInteracao".`);
+      }
+      if (npc.sprite && !FOLHAS[npc.sprite]) {
+        problemas.push(`${mapa.id}: NPC "${npc.id}" usa o sprite "${npc.sprite}", que não está em jogo/folhasPersonagens.ts.`);
+      }
+      if (npc.tipo === 'treinador' && !existeTreinador(npc.idTreinador)) {
+        problemas.push(`${mapa.id}: NPC "${npc.id}" aponta para o treinador inexistente "${npc.idTreinador}".`);
       }
     }
   }

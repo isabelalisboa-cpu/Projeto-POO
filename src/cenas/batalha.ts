@@ -5,12 +5,12 @@
 // chama a Batalha e mostra o resultado.
 // =====================================================================
 import {
-  type Acao, AcaoAtacar, AcaoCapturar, AcaoItem, AcaoTrocar, type Ataque, Batalha, Estado,
+  type Acao, AcaoAtacar, AcaoCapturar, AcaoItem, AcaoTrocar, type Ataque, type Batalha, Estado,
   type ItemCaptura, Monstrinho, StatusBatalha, type Treinador,
 } from '../chuments';
 import { CONFIG } from '../config';
 import {
-  contarMochila, CORES_ELEMENTO, CORES_ESTADO, criarEsforco, definirAtivos, efetividade,
+  contarMochila, CORES_ELEMENTO, CORES_ESTADO, criarEsforco, efetividade,
   type InfoItem, vivos, xpParaProximoNivel,
 } from '../jogo/catalogo';
 import { jogo } from '../jogo/jogo';
@@ -24,10 +24,11 @@ import { escolherAlvoDeItem, escolherChumment } from './menus';
 export type ResultadoBatalha = 'vitoria' | 'derrota' | 'fuga';
 
 export interface OpcoesBatalha {
-  jogador: Treinador;
-  oponente: Treinador;
-  /** true = chumments selvagens (pode capturar e fugir). */
-  selvagem: boolean;
+  /**
+   * Batalha do chuments.ts já criada: treinador1 = jogador, treinador2 = oponente.
+   * É ela que decide o formato: 1 contra 1 no mato (oponente selvagem), 2 contra 2 contra treinadores.
+   */
+  batalha: Batalha;
   /** Dinheiro ganho ao vencer um treinador. */
   premio?: number;
 }
@@ -91,6 +92,12 @@ class CenaBatalha implements Cena {
   private readonly batalha: Batalha;
   private readonly jogador: Treinador;
   private readonly oponente: Treinador;
+  /** true = chumments selvagens (pode capturar e fugir). */
+  private readonly selvagem: boolean;
+  /** Chumments em campo por lado. */
+  private readonly porLado: number;
+  /** Última formação em campo (ver emCampo). */
+  private campo = { jogador: [] as Monstrinho[], oponente: [] as Monstrinho[] };
 
   private vidaExibida = new Map<Monstrinho, number>();
   private efeitos = new Map<Monstrinho, Efeito>();
@@ -109,11 +116,12 @@ class CenaBatalha implements Cena {
   private ultimoDesenho = performance.now();
 
   constructor(private readonly o: OpcoesBatalha, private readonly resolver: (r: ResultadoBatalha) => void) {
-    this.jogador = o.jogador;
-    this.oponente = o.oponente;
-    definirAtivos(this.jogador);
-    definirAtivos(this.oponente);
-    this.batalha = new Batalha(this.jogador, this.oponente);
+    this.batalha = o.batalha;
+    this.jogador = o.batalha.treinador1;
+    this.oponente = o.batalha.treinador2;
+    this.selvagem = this.oponente.isSelvagem;
+    this.porLado = this.selvagem ? 1 : 2; // mesma regra do construtor de Batalha
+    this.fotografar();
     // Quem já entrou desmaiado não deve ser anunciado de novo.
     for (const m of [...this.jogador.equipe, ...this.oponente.equipe]) if (m.getVida() <= 0) this.anunciados.add(m);
   }
@@ -121,9 +129,30 @@ class CenaBatalha implements Cena {
   iniciar(): void {
     this.roteiro().catch((erro) => {
       console.error(erro);
-      this.jogador.equipe.forEach((m) => m.resetarAposBatalha());
+      this.abandonar();
       this.encerrar('fuga');
     });
+  }
+
+  /** Sai de uma batalha que não chegou ao fim (fuga): limpa estados e devolve o limite de 2 ativos. */
+  private abandonar(): void {
+    this.jogador.equipe.forEach((m) => m.resetarAposBatalha());
+    this.jogador.definirLimiteAtivos(2);
+  }
+
+  private fotografar(): void {
+    this.campo = { jogador: [...this.jogador.ativos], oponente: [...this.oponente.ativos] };
+  }
+
+  /**
+   * Quem está em campo. Quando a batalha termina, a Batalha devolve o limite de ativos para 2
+   * e refaz "ativos"; para a tela e a experiência valerem só para quem lutou, a cena guarda
+   * a última formação antes do fim.
+   */
+  private emCampo(lado: Treinador): Monstrinho[] {
+    if (!this.acabou()) this.fotografar();
+    const lista = lado === this.jogador ? this.campo.jogador : this.campo.oponente;
+    return lista.filter((m) => lado.equipe.includes(m));
   }
 
   private encerrar(resultado: ResultadoBatalha): void {
@@ -142,7 +171,7 @@ class CenaBatalha implements Cena {
     const { jogador, oponente } = this;
     const nomes = (lista: Monstrinho[]) => lista.map((m) => m.nome).join(' e ');
 
-    if (this.o.selvagem) {
+    if (this.selvagem) {
       await this.msg(`${nomes(oponente.ativos)} ${oponente.ativos.length > 1 ? 'selvagens apareceram' : 'selvagem apareceu'}!`);
     } else {
       await this.msg(`${oponente.nome} quer batalhar e enviou ${nomes(oponente.ativos)}!`);
@@ -153,7 +182,7 @@ class CenaBatalha implements Cena {
       const comandos = await this.comandosDoJogador();
       if (comandos === 'fuga') {
         await this.msg('Você fugiu em segurança!');
-        jogador.equipe.forEach((m) => m.resetarAposBatalha());
+        this.abandonar();
         this.encerrar('fuga');
         return;
       }
@@ -192,7 +221,7 @@ class CenaBatalha implements Cena {
           { rotulo: 'Atacar', valor: 'atacar' },
           { rotulo: 'Mochila', valor: 'mochila', detalhe: `${this.jogador.mochila.length}` },
           { rotulo: 'Trocar', valor: 'trocar', detalhe: preso ? 'Preso na lama' : undefined, desabilitada: preso },
-          { rotulo: 'Fugir', valor: 'fugir', detalhe: this.o.selvagem ? undefined : 'Não dá!', desabilitada: !this.o.selvagem },
+          { rotulo: 'Fugir', valor: 'fugir', detalhe: this.selvagem ? undefined : 'Não dá!', desabilitada: !this.selvagem },
         ],
       });
       if (opcao === null) return 'voltar';
@@ -273,7 +302,7 @@ class CenaBatalha implements Cena {
       const info = await escolher<InfoItem>({
         titulo: 'MOCHILA', x: 420, base: CAIXA.y + CAIXA.h, largura: 524, linhasVisiveis: 6, indiceInicial: indice,
         opcoes: grupos.map((g) => {
-          const bloqueado = g.info.uso === 'captura' && !this.o.selvagem;
+          const bloqueado = g.info.uso === 'captura' && !this.selvagem;
           return {
             rotulo: g.info.item.nome, valor: g.info, detalhe: `x${g.quantidade}`,
             descricao: bloqueado ? 'Não é possível capturar o chumment de outro treinador.' : g.info.descricao,
@@ -340,11 +369,13 @@ class CenaBatalha implements Cena {
 
     for (const { acao } of ordem) {
       if (this.acabou()) break;
+      this.fotografar();
       await this.executar(acao);
       await this.anunciarDesmaios();
     }
     if (!this.acabou()) {
       // Queimadura e sangramento
+      this.fotografar();
       for (const log of this.batalha.processarEfeitosFimDeTurno()) await this.msg(log);
       await this.anunciarDesmaios();
     }
@@ -368,11 +399,6 @@ class CenaBatalha implements Cena {
     const inimigo = lado === this.jogador ? this.oponente : this.jogador;
     if (usuario.getVida() <= 0 || !lado.ativos.includes(usuario)) return;
 
-    if (usuario.temEstado(Estado.DORMINDO) || usuario.temEstado(Estado.CONGELADO)) {
-      await this.msg(`${usuario.nome} não consegue se mover!`);
-      return;
-    }
-
     const emCampo = vivos(inimigo.ativos);
     let alvos: Monstrinho[];
     if (acao.ataque.isMultiTargetAtaque()) alvos = emCampo;
@@ -383,13 +409,20 @@ class CenaBatalha implements Cena {
     }
     if (alvos.length === 0) return;
 
-    this.efeitos.set(usuario, { tipo: 'avanco', t: 0 });
+    let agiu = false;
     for (const alvo of alvos) {
       if (this.acabou()) break;
       const vidaAntes = alvo.getVida();
-      // A Batalha calcula precisão, dano, crítico e reações elementais.
-      let log = this.batalha.processarAtaque(usuario, alvo, acao.ataque);
-      if (!log) continue;
+      const vidaUsuario = usuario.getVida();
+      // A Batalha calcula estados (congelado, dormindo, confuso), precisão, dano, crítico e reações.
+      const { log: resultado, detalhes } = this.processarAtaque(usuario, alvo, acao.ataque);
+      if (!resultado) continue;
+      let log = resultado;
+      // "⚔️ ..." (acertou) ou "❌ ..." (errou): o chumment agiu. Qualquer outra mensagem é um estado que o impediu.
+      const tentou = log.startsWith('⚔️') || log.startsWith('❌');
+      if (tentou && !agiu) this.efeitos.set(usuario, { tipo: 'avanco', t: 0 });
+      agiu ||= tentou;
+      if (usuario.getVida() < vidaUsuario) this.efeitos.set(usuario, { tipo: 'tremor', t: 0 }); // confuso: machucou a si mesmo
       if (alvo.getVida() < vidaAntes) {
         this.efeitos.set(alvo, { tipo: 'tremor', t: 0 });
         const mult = efetividade(acao.ataque.getElemento(), alvo.getElementoInerente());
@@ -397,9 +430,31 @@ class CenaBatalha implements Cena {
         else if (mult < 1) log += ' Não é muito efetivo...';
       }
       await this.msg(log);
+      // Efeitos das reações (Vinhas, Condutividade, Redemoinho...) que o chuments.ts só escreve no console.
+      for (const detalhe of detalhes) await this.msg(detalhe);
+      if (!tentou) break;
     }
     // O PP é gasto depois: processarAtaque() recusa o golpe se o PP já estiver em zero.
-    acao.ataque.consumirPP();
+    if (agiu) acao.ataque.consumirPP();
+  }
+
+  /**
+   * Chama Batalha.processarAtaque() e recolhe as linhas "-> ..." que o GerenciadorDeReacoes
+   * escreve no console, para mostrá-las ao jogador.
+   */
+  private processarAtaque(usuario: Monstrinho, alvo: Monstrinho, ataque: Ataque): { log: string; detalhes: string[] } {
+    const detalhes: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      const linha = args.map(String).join(' ');
+      if (/^\s*->/.test(linha)) detalhes.push(linha.replace(/^\s*->\s*/, ''));
+      original(...args);
+    };
+    try {
+      return { log: this.batalha.processarAtaque(usuario, alvo, ataque), detalhes };
+    } finally {
+      console.log = original;
+    }
   }
 
   private async executarItem(acao: AcaoItem): Promise<void> {
@@ -455,8 +510,8 @@ class CenaBatalha implements Cena {
   }
 
   private async premiarDerrota(inimigo: Monstrinho): Promise<void> {
-    if (this.o.selvagem) this.dinheiroSelvagem += CONFIG.dinheiroPorSelvagem(inimigo.getNivel());
-    const recebem = vivos(this.jogador.ativos).filter((m) => m.getNivel() < 30);
+    if (this.selvagem) this.dinheiroSelvagem += CONFIG.dinheiroPorSelvagem(inimigo.getNivel());
+    const recebem = vivos(this.emCampo(this.jogador)).filter((m) => m.getNivel() < 30);
     if (recebem.length === 0) return;
 
     const xp = Math.max(1, Math.ceil(CONFIG.xpPorDerrota(inimigo.getNivel()) / recebem.length));
@@ -504,17 +559,13 @@ class CenaBatalha implements Cena {
   }
 
   private async reporDesmaiados(): Promise<void> {
-    // Oponente: envia o próximo da fila.
-    this.oponente.ativos = vivos(this.oponente.ativos);
-    while (this.oponente.ativos.length < 2) {
-      const proximo = vivos(this.oponente.equipe).find((m) => !this.oponente.ativos.includes(m));
-      if (!proximo) break;
-      this.oponente.ativos.push(proximo);
-      await this.msg(`${this.oponente.nome} enviou ${proximo.nome}!`);
+    // Oponente: as reservas entram sozinhas (Treinador.reporAtivosDesmaiados).
+    for (const m of this.oponente.reporAtivosDesmaiados()) {
+      await this.msg(`${this.oponente.nome} enviou ${m.nome} para a batalha!`);
     }
     // Jogador: escolhe quem entra.
     this.jogador.ativos = vivos(this.jogador.ativos);
-    while (this.jogador.ativos.length < 2) {
+    while (this.jogador.ativos.length < this.porLado) {
       const banco = vivos(this.jogador.equipe).filter((m) => !this.jogador.ativos.includes(m));
       if (banco.length === 0) break;
       this.fixar('Escolha quem entra em campo.');
@@ -539,7 +590,7 @@ class CenaBatalha implements Cena {
       return;
     }
 
-    if (!this.o.selvagem) {
+    if (!this.selvagem) {
       await this.msg(`Você venceu ${oponente.nome}!`);
       if (this.o.premio) {
         jogador.adicionarDinheiro(this.o.premio);
@@ -603,10 +654,11 @@ class CenaBatalha implements Cena {
     this.tempo += dt;
 
     this.desenharFundo(ctx);
-    this.oponente.ativos.forEach((m, i) => this.desenharEmCampo(ctx, m, CAMPO_OPONENTE[i] ?? CAMPO_OPONENTE[1], TAMANHO_OPONENTE, false, dt));
-    this.jogador.ativos.forEach((m, i) => this.desenharEmCampo(ctx, m, CAMPO_JOGADOR[i] ?? CAMPO_JOGADOR[1], TAMANHO_JOGADOR, true, dt));
-    this.oponente.ativos.forEach((m, i) => this.desenharPainel(ctx, m, PAINEL_OPONENTE[i] ?? PAINEL_OPONENTE[1], false, dt));
-    this.jogador.ativos.forEach((m, i) => this.desenharPainel(ctx, m, PAINEL_JOGADOR[i] ?? PAINEL_JOGADOR[1], true, dt));
+    const aliados = this.emCampo(this.jogador), rivais = this.emCampo(this.oponente);
+    rivais.forEach((m, i) => this.desenharEmCampo(ctx, m, CAMPO_OPONENTE[i] ?? CAMPO_OPONENTE[1], TAMANHO_OPONENTE, false, dt));
+    aliados.forEach((m, i) => this.desenharEmCampo(ctx, m, CAMPO_JOGADOR[i] ?? CAMPO_JOGADOR[1], TAMANHO_JOGADOR, true, dt));
+    rivais.forEach((m, i) => this.desenharPainel(ctx, m, PAINEL_OPONENTE[i] ?? PAINEL_OPONENTE[1], false, dt));
+    aliados.forEach((m, i) => this.desenharPainel(ctx, m, PAINEL_JOGADOR[i] ?? PAINEL_JOGADOR[1], true, dt));
 
     // Caixa de mensagens
     painel(ctx, CAIXA.x, CAIXA.y, CAIXA.w, CAIXA.h);
@@ -643,8 +695,8 @@ class CenaBatalha implements Cena {
       ctx.fillStyle = '#c9e7a9';
       ctx.beginPath(); ctx.ellipse(x, y, rx, rx * 0.26, 0, 0, Math.PI * 2); ctx.fill();
     };
-    CAMPO_OPONENTE.slice(0, Math.max(1, this.oponente.ativos.length)).forEach((p) => plataforma(p.x, p.y - 6, 84));
-    CAMPO_JOGADOR.slice(0, Math.max(1, this.jogador.ativos.length)).forEach((p) => plataforma(p.x, p.y - 8, 104));
+    CAMPO_OPONENTE.slice(0, Math.max(1, this.emCampo(this.oponente).length)).forEach((p) => plataforma(p.x, p.y - 6, 84));
+    CAMPO_JOGADOR.slice(0, Math.max(1, this.emCampo(this.jogador).length)).forEach((p) => plataforma(p.x, p.y - 8, 104));
   }
 
   private desenharEmCampo(ctx: CanvasRenderingContext2D, m: Monstrinho, pos: { x: number; y: number }, tamanho: number, aliado: boolean, dt: number): void {

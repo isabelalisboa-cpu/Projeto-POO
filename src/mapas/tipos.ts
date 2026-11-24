@@ -32,10 +32,19 @@ interface NPCBase {
   y: number;
   direcao?: Direcao;
   /**
-   * Se informado, o jogo desenha o NPC. Se omitido, o NPC já faz parte da
-   * imagem do mapa (ex.: atendente atrás do balcão) e "areaInteracao" é obrigatória.
+    * Folha de sprites do NPC: chave em jogo/folhasPersonagens.ts (ex.: 'treinador_azul').
+    * Sem "sprite" e sem "aparencia", o NPC já faz parte da imagem do mapa
+    * (ex.: atendente atrás do balcão) e "areaInteracao" é obrigatória.
    */
+  sprite?: string;
+  /** Alternativa sem imagem: personagem desenhado por código com estas cores. */
   aparencia?: Aparencia;
+  /** Tamanho em relação aos outros personagens do mapa (padrão 1). Ex.: 1.15 para um adulto. */
+    escala?: number;
+  /** O NPC só aparece depois que todos estes treinadores (ids) forem vencidos. */
+  requer?: string[];
+  /** O NPC deixa de aparecer depois que todos estes treinadores (ids) forem vencidos. */
+  someApos?: string[];
   /** Onde o jogador precisa estar para conversar. Padrão: perto do NPC. */
   areaInteracao?: Ret;
 }
@@ -46,6 +55,8 @@ export interface NPCLoja extends NPCBase {
   itens: string[];
   saudacao: string[];
   despedida: string[];
+  /** true = também cura a equipe de graça (classe Hospital do chuments.ts). */
+  cura?: boolean;
 }
 
 /** Treinador que batalha. "idTreinador" é o id em criarNPCs() do chuments.ts. */
@@ -53,6 +64,8 @@ export interface NPCTreinador extends NPCBase {
   tipo: 'treinador';
   idTreinador: string;
   falaDerrotado: string[];
+  /** true = chefe final: vencê-lo mostra a tela de parabéns. */
+  chefeFinal?: boolean;
 }
 
 export interface NPCFala extends NPCBase {

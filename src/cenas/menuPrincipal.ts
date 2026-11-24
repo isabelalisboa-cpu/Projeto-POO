@@ -3,7 +3,7 @@ import { Elemento, Treinador } from '../chuments';
 import { CONFIG } from '../config';
 import { CORES_ELEMENTO, criarEspecie, emSilencio, infoItem } from '../jogo/catalogo';
 import { jogo } from '../jogo/jogo';
-import { aparenciaJogador, desenharPersonagem } from '../jogo/personagens';
+import { desenharFigura, visualJogador } from '../jogo/personagens';
 import { carregarJogo, lerSave } from '../jogo/persistencia';
 import { obterMapa } from '../mapas/registro';
 import type { Cena } from '../motor/cena';
@@ -82,7 +82,7 @@ class CenaMenuPrincipal implements Cena {
       opcoes: [{ rotulo: 'Menino', valor: 'Masculino' }, { rotulo: 'Menina', valor: 'Feminino' }],
       painelExtra: (ctx, valor) => {
         painel(ctx, 570, 200, 140, 170);
-        desenharPersonagem(ctx, 640, 345, 110, 'baixo', 0, aparenciaJogador(valor ?? 'Masculino'));
+        desenharFigura(ctx, visualJogador(valor ?? 'Masculino'), 640, 345, 110, 'baixo', null);
       },
     });
     if (!sexo) return false;
@@ -111,8 +111,12 @@ class CenaMenuPrincipal implements Cena {
       npcsDerrotados: new Set(),
     };
     jogo.cenas.substituirTudo(new CenaMundo());
+    // A mãe é apresentada logo no início (ela espera na sala e é a campeã da Liga).
     await falar([
-      `Bom dia, ${nome}! ${inicial} já está pronto para a primeira aventura.`,
+      `${nome}, hora de acordar! ${inicial} já está pulando de ansiedade aqui embaixo.`,
+      'Desça até a sala antes de sair: quero falar com você sobre a sua jornada.',
+    ], 'Mamãe');
+    await falar([
       'Ande com as setas ou W A S D. Enter ou Espaço conversa e interage. Esc abre o menu (equipe, mochila e salvar).',
       'A cama recupera a sua equipe e o computador guarda chumments. Ao norte da vila, na grama alta da Rota 1, vivem chumments selvagens!',
     ]);

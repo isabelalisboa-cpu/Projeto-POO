@@ -2,11 +2,12 @@
 // MUNDO: movimento do jogador, colisões, troca de mapas, NPCs,
 // interações e encontros na grama alta.
 // =====================================================================
-import { criarNPCs, Treinador } from '../chuments';
+import { Batalha, criarTreinadorNPC } from '../chuments';
 import { CONFIG } from '../config';
-import { criarSelvagem, definirAtivos, recuperarEquipe, vivos } from '../jogo/catalogo';
+import { definirAtivos, iniciarBatalhaSelvagem, recuperarEquipe, vivos } from '../jogo/catalogo';
 import { estado, jogo } from '../jogo/jogo';
-import { aparenciaJogador, desenharPersonagem } from '../jogo/personagens';
+import { desenharFigura, direcaoPossivel, visualJogador } from '../jogo/personagens';
+import { obterTreinador } from '../jogo/treinadores';
 import { salvarJogo } from '../jogo/persistencia';
 import { obterMapa } from '../mapas/registro';
 import type { DefinicaoMapa, Direcao, Interacao, NPC, NPCTreinador } from '../mapas/tipos';
@@ -18,8 +19,12 @@ import { falar } from '../ui/dialogos';
 import { CORES, painel, retArredondado, texto } from '../ui/ui';
 import { iniciarBatalha, type ResultadoBatalha } from './batalha';
 import { abrirLoja, abrirMenuPausa, abrirPC } from './menus';
+import { mostrarParabens } from './parabens';
 
 type AlvoInteracao = { npc: NPC } | { objeto: Interacao };
+
+/** O NPC é desenhado pelo jogo (tem folha de sprites ou cores)? Se não, já está na imagem do mapa. */
+const desenhado = (npc: NPC): boolean => !!(npc.sprite || npc.aparencia);
 
 const DURACAO_ESCURECER = 0.22;
 
@@ -111,6 +116,14 @@ export class CenaMundo implements Cena {
     return img ? { w: img.naturalWidth, h: img.naturalHeight, img } : { w: 1536, h: 1024 };
   }
 
+  /** NPCs presentes agora no mapa (respeita "requer" e "someApos"). */
+  private npcs(): NPC[] {
+    const vencidos = estado().npcsDerrotados;
+    return (this.mapa.npcs ?? []).filter((npc) =>
+      (npc.requer ?? []).every((id) => vencidos.has(id))
+      && !(npc.someApos?.length && npc.someApos.every((id) => vencidos.has(id))));
+  }
+
   // -------------------------------------------------------------------
   // Colisão
   // -------------------------------------------------------------------
@@ -141,8 +154,8 @@ export class CenaMundo implements Cena {
       for (const [px, py] of pontos) if (!areas.some((a) => contemPonto(a, px, py))) return false;
     }
     if (this.mapa.colisoes.some((c) => intersecta(c, pes))) return false;
-    for (const npc of this.mapa.npcs ?? []) {
-      if (npc.aparencia && intersecta(this.caixaNPC(npc), pes)) return false;
+    for (const npc of this.npcs()) {
+      if (desenhado(npc) && intersecta(this.caixaNPC(npc), pes)) return false;
     }
     return true;
   }
@@ -249,13 +262,9 @@ export class CenaMundo implements Cena {
   }
 
   private async batalhaSelvagem(niveis: [number, number]): Promise<void> {
-    const jogador = estado().treinador;
-    // Batalha em dupla: dois selvagens quando o jogador tem dois chumments de pé.
-    const quantidade = Math.min(2, vivos(jogador.equipe).length);
-    const selvagens = Array.from({ length: quantidade }, () => criarSelvagem(niveis));
-    const selvagem = new Treinador('Selvagem', selvagens);
-    selvagem.isSelvagem = true;
-    const resultado = await iniciarBatalha({ jogador, oponente: selvagem, selvagem: true });
+    // No mato a batalha é 1 contra 1: quem cria é GramaAlta.iniciarBatalha(), do chuments.ts.
+    const batalha = iniciarBatalhaSelvagem(estado().treinador, niveis);
+    const resultado = await iniciarBatalha({ batalha });
     await this.aposBatalha(resultado);
   }
 
@@ -281,7 +290,7 @@ export class CenaMundo implements Cena {
     const e = estado();
     const t = this.mapa.tamanhoPersonagem;
     const pes = this.caixaPes(e.x, e.y);
-    for (const npc of this.mapa.npcs ?? []) {
+    for (const npc of this.npcs()) {
       const perto = npc.areaInteracao
         ? intersecta(npc.areaInteracao, pes)
         : Math.hypot(npc.x - e.x, npc.y - e.y) < t * 1.05;
@@ -296,9 +305,9 @@ export class CenaMundo implements Cena {
   private async interagir(alvo: AlvoInteracao): Promise<void> {
     if ('npc' in alvo) {
       const npc = alvo.npc;
-      if (npc.aparencia) this.direcaoNPC.set(npc.id, this.direcaoPara(npc));
+      if (desenhado(npc)) this.direcaoNPC.set(npc.id, this.direcaoPara(npc));
       if (npc.tipo === 'loja') await abrirLoja(npc);
-      else if (npc.tipo === 'fala') await falar(npc.falas, npc.nome);
+      else if (npc.tipo === 'fala') await falar(npc.falas.map((f) => this.comNome(f)), npc.nome);
       else await this.desafiar(npc);
       return;
     }
@@ -316,20 +325,27 @@ export class CenaMundo implements Cena {
     }
   }
 
-  /** Direção em que o NPC deve olhar para encarar o jogador. */
+  /** Direção em que o NPC deve olhar para encarar o jogador (dentro do que a folha dele tem). */
   private direcaoPara(npc: NPC): Direcao {
     const e = estado();
     const dx = e.x - npc.x, dy = e.y - npc.y;
-    return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'direita' : 'esquerda') : (dy > 0 ? 'baixo' : 'cima');
+    const lado: Direcao = dx > 0 ? 'direita' : 'esquerda';
+    const ideal: Direcao = Math.abs(dx) > Math.abs(dy) ? lado : (dy > 0 ? 'baixo' : 'cima');
+    return direcaoPossivel(npc.sprite, ideal, lado);
+  }
+
+  /** Troca {nome} pelo nome do jogador. */
+  private comNome(fala: string): string {
+    return fala.replaceAll('{nome}', estado().treinador.nome);
   }
 
   private async desafiar(npc: NPCTreinador): Promise<void> {
     const e = estado();
     if (e.npcsDerrotados.has(npc.idTreinador)) { await falar(npc.falaDerrotado, npc.nome); return; }
 
-    const dados = criarNPCs().find((d) => d.id === npc.idTreinador);
+    const dados = obterTreinador(npc.idTreinador);
     if (!dados) {
-      console.warn(`[npc] "${npc.idTreinador}" não existe em criarNPCs() do chuments.ts.`);
+      console.warn(`[npc] treinador "${npc.idTreinador}" não existe em criarNPCs() do chuments.ts.`);
       await falar('...', npc.nome);
       return;
     }
@@ -337,16 +353,18 @@ export class CenaMundo implements Cena {
       await falar('Seus chumments precisam descansar antes de batalhar.', dados.nome);
       return;
     }
-    await falar(dados.textoVitoria, dados.nome);
+    await falar(this.comNome(dados.textoVitoria), dados.nome);
+    // Contra treinadores a batalha é sempre 2 contra 2 e as reservas do NPC entram sozinhas.
     const resultado = await iniciarBatalha({
-      jogador: e.treinador,
-      oponente: new Treinador(dados.nome, dados.equipe),
-      selvagem: false,
+      batalha: new Batalha(e.treinador, criarTreinadorNPC(dados)),
       premio: dados.dinheiroPremio,
     });
     if (resultado === 'vitoria') e.npcsDerrotados.add(dados.id);
     await this.aposBatalha(resultado);
-    if (resultado === 'vitoria') await falar(npc.falaDerrotado, npc.nome);
+    if (resultado !== 'vitoria') return;
+    await falar(npc.falaDerrotado.map((f) => this.comNome(f)), npc.nome);
+    // Chefe final vencido: tela de parabéns.
+    if (npc.chefeFinal) await mostrarParabens(dados.nome);
   }
 
   // -------------------------------------------------------------------
@@ -381,14 +399,12 @@ export class CenaMundo implements Cena {
     }
 
     // Personagens em ordem de profundidade (quem está mais abaixo fica na frente).
-    const passo = this.andando ? [1, 0, 2, 0][Math.floor(this.tempoPasso * 9) % 4] : 0;
     const figuras: { y: number; desenhar: () => void }[] = [
-      { y: e.y, desenhar: () => desenharPersonagem(ctx, e.x, e.y, t, e.direcao, passo, aparenciaJogador(e.treinador.sexo)) },
+      { y: e.y, desenhar: () => desenharFigura(ctx, visualJogador(e.treinador.sexo), e.x, e.y, t, e.direcao, this.andando ? this.tempoPasso : null) },
     ];
-    for (const npc of this.mapa.npcs ?? []) {
-      const ap = npc.aparencia;
-      if (!ap) continue;
-      figuras.push({ y: npc.y, desenhar: () => desenharPersonagem(ctx, npc.x, npc.y, t, this.direcaoNPC.get(npc.id) ?? npc.direcao ?? 'baixo', 0, ap) });
+    for (const npc of this.npcs()) {
+      if (!desenhado(npc)) continue;
+      figuras.push({ y: npc.y, desenhar: () => desenharFigura(ctx, npc, npc.x, npc.y, t, this.direcaoNPC.get(npc.id) ?? npc.direcao ?? 'baixo', null) });
     }
     figuras.sort((a, b) => a.y - b.y).forEach((f) => f.desenhar());
 
@@ -399,9 +415,10 @@ export class CenaMundo implements Cena {
     const alvo = !this.ocupado && !this.transicao ? this.alvoInteracao() : null;
     if (alvo) {
       // Sobre o NPC, quando ele é desenhado pelo jogo; senão, sobre o jogador.
-      const ancora = 'npc' in alvo && alvo.npc.aparencia ? alvo.npc : e;
+      const npcAlvo = 'npc' in alvo && desenhado(alvo.npc) ? alvo.npc : null;
+      const ancora = npcAlvo ?? e;
       const bx = ox + ancora.x * escala;
-      const by = oy + (ancora.y - t) * escala - 30 + Math.sin(this.tempo * 6) * 2;
+      const by = oy + (ancora.y - t * 1.12 * (npcAlvo?.escala ?? 1)) * escala - 30 + Math.sin(this.tempo * 6) * 2;
       ctx.fillStyle = CORES.borda;
       retArredondado(ctx, bx - 31, by - 2, 62, 26, 8); ctx.fill();
       ctx.fillStyle = CORES.selecao;
@@ -469,9 +486,9 @@ export class CenaMundo implements Cena {
     for (const z of this.mapa.encontros?.zonas ?? []) ret(z, 'rgba(250,220,40,0.25)', 'rgba(250,220,40,0.9)');
     for (const c of this.mapa.colisoes) ret(c, 'rgba(230,50,50,0.35)', 'rgba(230,50,50,0.95)');
     for (const i of this.mapa.interacoes ?? []) ret(i.area, 'rgba(190,80,230,0.30)', 'rgba(190,80,230,0.95)');
-    for (const n of this.mapa.npcs ?? []) {
+    for (const n of this.npcs()) {
       if (n.areaInteracao) ret(n.areaInteracao, 'rgba(255,140,30,0.30)', 'rgba(255,140,30,0.95)');
-      if (n.aparencia) ret(this.caixaNPC(n), 'rgba(255,140,30,0.45)', 'rgba(255,140,30,1)');
+      if (desenhado(n)) ret(this.caixaNPC(n), 'rgba(255,140,30,0.45)', 'rgba(255,140,30,1)');
     }
     for (const p of this.mapa.portais) ret(p.area, 'rgba(40,120,255,0.45)', 'rgba(40,120,255,1)');
     for (const [nome, en] of Object.entries(this.mapa.entradas)) {

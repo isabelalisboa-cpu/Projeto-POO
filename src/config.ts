@@ -25,18 +25,6 @@ export const CONFIG = {
   mapaRecuperacao: 'centro',
   entradaRecuperacao: 'recuperacao',
 
-  // --- Preços (o chuments.ts não define preços) -----------------------
-  precos: {
-    'Poção Inicial': 20,
-    'Poção Intermediária': 45,
-    'Poção Avançada': 90,
-    'Vitalizador': 40,
-    'Vitalizador Supremo': 120,
-    'Capturador Comum': 30,
-    'Capturador Avançado': 75,
-    'Capturador Supremo': 150,
-  } as Record<string, number>,
-
   // --- Recompensas ----------------------------------------------------
   /** XP ganho ao derrotar um chumment (dividido entre os aliados em campo). */
   xpPorDerrota: (nivelInimigo: number): number => 6 + 4 * nivelInimigo,
@@ -47,6 +35,11 @@ export const CONFIG = {
   /** Velocidade do jogador, em "alturas do personagem" por segundo. */
   velocidadeJogador: 3.4,
 
+  // --- Sprites dos personagens ---------------------------------------
+  pastaPersonagens: 'assets/personagens/',
+  /** Folha de sprites do jogador (chave em jogo/folhasPersonagens.ts) conforme a escolha no início. */
+  spritesJogador: { Masculino: 'jovem', Feminino: 'treinadora' } as Record<string, string>,
+
   // --- Sprites dos chumments -----------------------------------------
   pastaSprites: 'assets/chumments/',
   /**
@@ -54,6 +47,18 @@ export const CONFIG = {
    * Ex.: { 'Fizzy Jr.': 'fizzy.png' }
    */
   arquivosSprites: {} as Record<string, string>,
+  /**
+   * Desenhos sem transparência, com fundo de uma cor só (ex.: cinza): o jogo apaga o fundo
+   * sozinho, a partir das bordas da imagem, e recorta a sobra em volta do chumment.
+   * PNGs que já têm transparência não são alterados.
+   */
+  removerFundoSprites: true,
+  /**
+   * Chumments em que os espaços FECHADOS pelo desenho (ex.: o vão dentro do laço da Electrusa)
+   * também devem ficar transparentes. Não é feito para todos porque em alguns desenhos uma parte
+   * do corpo tem exatamente a cor do fundo (o rosto do Lumi e do Lumiel) e sumiria junto.
+   */
+  fundoInternoTransparente: ['Electrusa', 'Hurrihawk', 'Jellerinna', 'Frilizard', 'Flareperor', 'Glacielle', 'Verdalisk'],
   /** Espelha horizontalmente os chumments do jogador na batalha. */
   espelharAliados: true,
 

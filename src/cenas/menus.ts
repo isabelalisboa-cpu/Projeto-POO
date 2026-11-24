@@ -1,7 +1,7 @@
 // Menus do jogo fora de batalha: pausa, equipe, mochila, loja e armazenamento (PC).
 import type { Ataque, Monstrinho, Treinador } from '../chuments';
 import { CONFIG } from '../config';
-import { contarMochila, definirAtivos, infoItem, type InfoItem, vivos } from '../jogo/catalogo';
+import { contarMochila, definirAtivos, hospital, infoItem, type InfoItem, loja, precoDe, vivos } from '../jogo/catalogo';
 import { estado } from '../jogo/jogo';
 import { salvarJogo } from '../jogo/persistencia';
 import { obterMapa } from '../mapas/registro';
@@ -140,30 +140,47 @@ async function menuMochila(): Promise<void> {
 export async function abrirLoja(npc: NPCLoja): Promise<void> {
   const t = estado().treinador;
   await falar(npc.saudacao, npc.nome);
+
+  type Produto = { info: InfoItem; preco: number };
+  // Os preços são os do catálogo da classe Loja (chuments.ts).
+  const produtos: Produto[] = [];
+  for (const nome of npc.itens) {
+    const info = infoItem(nome);
+    const preco = info ? precoDe(info.item) : undefined;
+    if (info && preco !== undefined) produtos.push({ info, preco });
+    else console.warn(`[loja] "${nome}" não está em catalogo.ts ou não tem preço na classe Loja.`);
+  }
+
   let indice = 0;
   while (true) {
-    const produtos = npc.itens
-      .map((nome) => ({ info: infoItem(nome), preco: CONFIG.precos[nome] }))
-      .filter((p): p is { info: InfoItem; preco: number } => {
-        if (!p.info || p.preco === undefined) console.warn(`[loja] item sem cadastro ou sem preço: verifique catalogo.ts e config.ts`);
-        return !!p.info && p.preco !== undefined;
-      });
-    const escolhido = await escolher<{ info: InfoItem; preco: number }>({
+    const escolhido = await escolher<Produto | 'curar'>({
       titulo: `${npc.nome.toUpperCase()} — Seu dinheiro: $${t.dinheiro}`,
       x: 220, y: 80, largura: 520, indiceInicial: indice,
-      opcoes: produtos.map((p) => {
-        const tem = t.mochila.filter((i) => i === p.info.item).length;
-        return {
-          rotulo: p.info.item.nome, valor: p,
-          detalhe: `$${p.preco}`,
-          descricao: `${p.info.descricao} Você tem: ${tem}.`,
-          desabilitada: t.dinheiro < p.preco,
-        };
-      }),
+      opcoes: [
+        ...(npc.cura ? [{
+          rotulo: 'Curar a equipe', valor: 'curar' as const, detalhe: 'Grátis',
+          descricao: 'Recupera a vida, o PP e os estados de todos os seus chumments.',
+        }] : []),
+        ...produtos.map((p) => {
+          const tem = t.mochila.filter((i) => i === p.info.item).length;
+          return {
+            rotulo: p.info.item.nome, valor: p,
+            detalhe: `$${p.preco}`,
+            descricao: `${p.info.descricao} Você tem: ${tem}.`,
+            desabilitada: t.dinheiro < p.preco,
+          };
+        }),
+      ],
     });
     if (!escolhido) break;
-    indice = produtos.indexOf(escolhido);
-    if (t.gastarDinheiro(escolhido.preco)) t.adicionarItem(escolhido.info.item);
+    if (escolhido === 'curar') {
+      indice = 0;
+      await falar(hospital.curar(t), npc.nome);       // Hospital.curar() do chuments.ts
+      if (CONFIG.autoSalvar) salvarJogo(estado());
+    } else {
+      indice = produtos.indexOf(escolhido) + (npc.cura ? 1 : 0);
+      loja.comprar(t, escolhido.info.item);           // Loja.comprar() cobra e entrega o item
+    }
   }
   await falar(npc.despedida, npc.nome);
 }

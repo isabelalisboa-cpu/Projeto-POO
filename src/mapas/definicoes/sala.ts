@@ -1,4 +1,5 @@
 import type { DefinicaoMapa } from '../tipos';
+import { LIDERES } from '../../jogo/treinadores';
 
 const sala: DefinicaoMapa = {
   id: 'sala',
@@ -29,6 +30,24 @@ const sala: DefinicaoMapa = {
     { x: 675, y: 495, w: 185, h: 205 },   // mesa
     { x: 936, y: 445, w: 152, h: 300 },   // sofá direito
     { x: 1385, y: 800, w: 95, h: 100 },   // planta
+  ],
+
+  npcs: [
+    {
+      // A mãe do protagonista: apresentada no início e chefe final (ela reaparece na Arena
+      // depois que os quatro líderes forem vencidos, e por isso some daqui).
+      tipo: 'fala',
+      id: 'sala_mae',
+      nome: 'Mamãe',
+      x: 930, y: 355, sprite: 'mae', escala: 1.12,
+      someApos: LIDERES,
+      falas: [
+        'Bom dia, {nome}! Então hoje começa a sua jornada.',
+        'Capture chumments na grama alta da Rota 1, ao norte da vila, e treine com os treinadores de lá. No mato, os selvagens aparecem um de cada vez.',
+        'Depois da rota fica a Liga. Vença os quatro líderes e eu estarei esperando por você na Arena.',
+        'Isso mesmo... a campeã sou eu. Não pense que vou facilitar só porque sou sua mãe!',
+      ],
+    },
   ],
 
   interacoes: [

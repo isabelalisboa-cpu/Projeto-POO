@@ -38,8 +38,9 @@ const centro: DefinicaoMapa = {
       nome: 'Enfermeira',
       x: 765, y: 300,
       areaInteracao: { x: 560, y: 446, w: 420, h: 85 },
+      cura: true,   // Hospital.curar(): cura a equipe inteira de graça
       itens: ['Poção Inicial', 'Poção Intermediária', 'Poção Avançada', 'Vitalizador', 'Vitalizador Supremo'],
-      saudacao: ['Olá! Aqui você encontra poções e vitalizadores para cuidar dos seus chumments.'],
+      saudacao: ['Olá! Posso curar a sua equipe de graça, e também vendo poções e vitalizadores.'],
       despedida: ['Cuide bem deles!'],
     },
   ],
